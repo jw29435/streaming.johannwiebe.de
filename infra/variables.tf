@@ -151,6 +151,22 @@ variable "base_domain" {
   default     = "streaming.johannwiebe.de"
 }
 
+variable "site_origins" {
+  description = <<-EOT
+    Herkünfte, denen Caddy den Abruf per JavaScript erlaubt. Caddy spiegelt die
+    passende zurück, alles andere bekommt gar keine CORS-Kopfzeile.
+
+    Die web.app-Adresse gehört dazu, weil Firebase Hosting immer darüber erreichbar ist —
+    auch nachdem die eigene Domain eingerichtet ist. Ohne sie schlägt jeder Test fehl,
+    der nicht über die endgültige Adresse läuft.
+  EOT
+  type        = list(string)
+  default = [
+    "https://streaming.johannwiebe.de",
+    "https://stream-johannwiebe-de.web.app",
+  ]
+}
+
 variable "cloudflare_zone_id" {
   description = "Zone johannwiebe.de bei Cloudflare."
   type        = string

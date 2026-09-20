@@ -2,7 +2,11 @@ locals {
   origin_host = "origin.${var.base_domain}"
   ingest_host = "ingest.${var.base_domain}"
   live_host   = "live.${var.base_domain}"
-  site_origin = "https://${var.base_domain}"
+
+  # Regulärer Ausdruck für Caddys header_regexp. Punkte und Bindestriche werden
+  # maskiert, damit aus "stream-johannwiebe-de.web.app" kein Muster wird, auf das
+  # auch "streamXjohannwiebeXde" passt.
+  site_origin_regex = "^(${join("|", [for o in var.site_origins : replace(o, ".", "\\.")])})$"
 
   config_bucket = "${var.project_id}-vm-config"
 

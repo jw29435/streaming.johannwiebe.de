@@ -44,7 +44,7 @@ locals {
       cloudflare_zone_id = var.cloudflare_zone_id
       origin_host        = local.origin_host
       ingest_host        = local.ingest_host
-      site_origin        = local.site_origin
+      site_origin_regex  = local.site_origin_regex
       channels           = var.ingest_channels
     })
 

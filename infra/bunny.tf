@@ -37,6 +37,11 @@ resource "bunnynet_pullzone" "live" {
   # würde Bunny den Query-String ignorieren und beide Varianten verwechseln.
   cache_vary_querystring = ["format"]
 
+  # Caddy spiegelt die anfragende Herkunft in Access-Control-Allow-Origin zurück.
+  # Ohne diese Zeile würde Bunny die Antwort für eine Herkunft allen anderen
+  # vorsetzen, und der Browser bräche mit einem CORS-Fehler ab.
+  cache_vary_headers = ["Origin"]
+
   strip_cookies = true
 
   # CORS setzt Caddy mit der konkreten Herkunft. Bunnys eigene CORS-Funktion würde
