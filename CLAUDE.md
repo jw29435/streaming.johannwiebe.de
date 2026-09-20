@@ -108,6 +108,25 @@ Ergebnisse der in der Phase-1-Aufgabe geforderten Prüfungen, jeweils an der Que
   Header zum Origin gibt es kein eigenes Feld; er läuft über eine Edge Rule mit der Aktion
   `SetRequestHeader`. Origin Shield steht in Europa nur als `FR` zur Verfügung.
 
+## Offene Schwachstelle bis Phase 3
+
+**In Phase 1 prüft OME den Stream-Key nicht.** Nachgewiesen am 20.09.2026: Ein frei erfundener
+Key wurde angenommen und als `kanal1` ausgeliefert. Der Grund ist die Bauweise — Push-Provider
+nehmen jeden Streamnamen an, und `<OutputStreamName>` bildet alles auf den öffentlichen Namen ab.
+Wer den App-Namen errät, kann senden.
+
+Der Test-Key ist damit nur ein Name, keine Anmeldung. Die Trennung von Ingest- und Wiedergabe-Pfad
+bleibt trotzdem richtig: Sie verhindert, dass der Key öffentlich sichtbar wird, und liefert die
+Struktur, auf der Phase 3 aufsetzt.
+
+Solange das so ist:
+
+- Die VM zwischen den Tests heruntergefahren lassen — das ist das wirksamste Mittel.
+- Wer früher schließen will, kann die Firewall-Regel `media-allow-ingest` von `0.0.0.0/0` auf die
+  IP des Streamorts einschränken. Nur sinnvoll, wenn die dortige IP fest ist.
+- **Phase 3 behebt es richtig:** AdmissionWebhooks prüfen den Key an der API, bevor OME den
+  Stream annimmt.
+
 ## Im ersten Test gelernt
 
 - **Die Verzögerung entsteht im Player, nicht auf der VM.** Gemessen am 20.09.2026: 23 s

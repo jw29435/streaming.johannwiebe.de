@@ -248,25 +248,36 @@ Ziel: dauerhaft unter 70 %.
 Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
 allein. Deshalb steht dort „entfällt".
 
-### Was der erste Test ergab (20.09.2026)
+### Stand der Abnahme (20.09.2026)
 
-Die Verzögerung entsteht fast vollständig im Player, nicht auf der VM:
+Serverseitig geprüft und erfüllt:
 
-| Abschnitt | Zeit |
+| Kriterium | Ergebnis |
 | --- | --- |
-| Ingest, Kodierung, Segmentierung auf der VM | 0,9 s |
-| Rückhalt im Player (drei Segmentlängen laut Spezifikation) | ~22 s |
-| **gemessen insgesamt** | **23 s** |
+| Stream kommt per SRT an, HLS über Bunny | ✅ mit echtem OBS |
+| RTMP als Rückfallebene | ✅ beide Kanäle |
+| Mehrere Qualitätsstufen | ✅ 720p, 360p, 144p |
+| Zurückspulen über die Streamdauer | ✅ `EXT-X-PLAYLIST-TYPE: EVENT` |
+| **CPU bei zwei Streams unter 70 %** | ✅ **31 % Mittel, 35 % Spitze** |
+| `conclude.sh` beendet die Playlist | ✅ setzt `EXT-X-ENDLIST` |
+| Origin ohne geheimen Header | ✅ 403 |
+| Port 13333 von außen, SSH | ✅ dicht, nur über IAP |
 
-Daraufhin `hls_segment_duration` von 4 auf 2 gesenkt; erwartet werden 13–17 s. **Noch nicht
-nachgemessen** — das ist der erste Punkt beim nächsten Test.
+**Zur Verzögerung.** Zuerst gemessen: 23 s insgesamt, davon nur 0,9 s auf der VM. Der Rest ist
+Rückhalt im Player, der sich nach HLS-Spezifikation drei Segmentlängen vom Live-Punkt fernhält —
+bei 4 s Segmenten also 12 s. Deshalb `hls_segment_duration` auf 2 gesenkt; der Rückhalt sinkt
+damit auf 6 s, der Server liegt bei 1,5–2,1 s. Rechnerisch 8–10 s. **Im echten Player noch nicht
+nachgemessen** — erster Punkt beim nächsten Test.
 
-So misst man den Serveranteil, ohne raten zu müssen: Die Medien-Playlist enthält je Segment ein
-`#EXT-X-PROGRAM-DATE-TIME`. Das Ende des letzten Segments gegen die aktuelle Uhrzeit gerechnet
-ergibt den Rückstand der VM. Alles darüber hinaus ist Player.
+So trennt man Server- von Player-Verzögerung, ohne zu raten: Die Medien-Playlist enthält je
+Segment ein `#EXT-X-PROGRAM-DATE-TIME`. Das Ende des letzten Segments gegen die Uhr gerechnet
+ergibt den Rückstand der VM; alles darüber hinaus ist Player.
 
-CPU mit **einem** Stream im Startprofil: Mittel 25 %, Spitze 28 %. Der Test mit zwei
-gleichzeitigen Streams steht noch aus.
+### Sicherheitshinweis zu Phase 1
+
+**Der Stream-Key wird noch nicht geprüft.** Ein erfundener Key wurde angenommen und ausgeliefert —
+Push-Provider nehmen jeden Streamnamen an. Wer den App-Namen errät, kann senden. Deshalb die VM
+zwischen den Tests heruntergefahren lassen; Phase 3 behebt es mit AdmissionWebhooks.
 
 Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
 allein. Die Zeitleiste im Vollbild erscheint dort nur, weil die Playlist vom Typ `EVENT` ist.
