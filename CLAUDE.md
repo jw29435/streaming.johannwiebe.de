@@ -16,9 +16,15 @@ englisch, damit sie zu den Werkzeugen passen.
 
 ## Aktueller Stand
 
-Phase 1 (Durchstich der Media-Pipeline). Die Infrastruktur ist ausgerollt: 45 Ressourcen,
-VM `media-vm` in `europe-west3-c`, Bunny Pull Zone `6654512`, Testseite auf
-`https://stream-johannwiebe-de.web.app`. Offen ist nur die Abnahme mit echtem OBS-Stream.
+Phase 1 (Durchstich der Media-Pipeline). Die Infrastruktur ist ausgerollt und die Pipeline
+trägt: Am 20.09.2026 kam ein OBS-Stream per SRT an, lief über Bunny als HLS und war über die
+ganze Streamdauer zurückspulbar. **Die VM ist seitdem heruntergefahren**, damit sie nichts
+kostet — vor dem nächsten Test starten.
+
+Die Abnahme ist noch nicht vollständig: Es fehlen der Gerätedurchlauf (Edge, Firefox,
+Android, iPhone, iPad), Vollbild und Qualitätswechsel, die Nachmessung der Verzögerung mit
+2-Sekunden-Segmenten und der CPU-Test mit zwei gleichzeitigen Streams. Die Tabelle in der
+README hält den Stand fest.
 
 | Phase | Inhalt | Stand |
 | --- | --- | --- |
@@ -101,6 +107,28 @@ Ergebnisse der in der Phase-1-Aufgabe geforderten Prüfungen, jeweils an der Que
   `cache_expiration_time = -1` bedeutet „Cache-Control des Origin beachten". Für den geheimen
   Header zum Origin gibt es kein eigenes Feld; er läuft über eine Edge Rule mit der Aktion
   `SetRequestHeader`. Origin Shield steht in Europa nur als `FR` zur Verfügung.
+
+## Im ersten Test gelernt
+
+- **Die Verzögerung entsteht im Player, nicht auf der VM.** Gemessen am 20.09.2026: 23 s
+  insgesamt, davon **0,9 s** Ingest, Kodierung und Segmentierung zusammen. Player halten sich
+  nach HLS-Spezifikation drei Segmentlängen vom Live-Punkt fern, also 12 s bei 4-Sekunden-
+  Segmenten. Der wirksame Hebel ist deshalb `hls_segment_duration`, nicht `hls_segment_count`.
+  Seit der Umstellung auf 2 s sind 13–17 s zu erwarten — **noch nicht nachgemessen.**
+- **CORS muss beide Adressen kennen.** Firebase Hosting ist immer auch unter
+  `stream-johannwiebe-de.web.app` erreichbar. Caddy prüft die Herkunft gegen `site_origins`
+  und spiegelt die passende zurück; Bunny variiert den Cache über die Origin-Kopfzeile, sonst
+  bekäme die eine Herkunft die zwischengespeicherte Antwort der anderen.
+- **Geänderte eingebundene Dateien erreichen die Container nicht von selbst.** `compose up`
+  bemerkt sie nicht, und `caddy reload` übernimmt keine geänderten Umgebungsvariablen — die
+  stehen im Container fest. Deshalb baut `refresh.sh` die Container neu auf statt sie neu zu
+  starten, und startet sich selbst neu, wenn es sich geändert hat.
+- **Die Fehlersuche gehört auf den Server.** `EXT-X-PROGRAM-DATE-TIME` in der Medien-Playlist
+  gegen die Uhr gerechnet trennt sauber zwischen Server- und Player-Verzögerung. Eine
+  Schätzung nach Gefühl lag um mehr als das Doppelte daneben.
+- **OBS sendet 720p mit 60 fps,** nicht mit 30 wie im Konzept angenommen. Die Stufe wird
+  unverändert durchgereicht, kostet also keine Rechenleistung, aber bei 3.000 kbit/s ist 60 fps
+  ein Qualitätsnachteil gegenüber 30. Vor Phase 2 klären.
 
 ## Werkzeuge auf diesem Rechner
 

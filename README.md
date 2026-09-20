@@ -236,13 +236,37 @@ Ziel: dauerhaft unter 70 %.
 
 | Gerät | Start | Qualitätswechsel | Vollbild | Zurückspulen | Verzögerung |
 | --- | --- | --- | --- | --- | --- |
-| Windows · Chrome | | | | | |
-| Windows · Edge | | | | | |
-| Windows · Firefox | | | | | |
-| Android · Chrome | | | | | |
-| iPhone · Safari | | | | | |
-| iPad · Safari | | | | | |
-| Mac · Safari | | | | | |
+| Mac · Chrome | ✅ 20.09. | offen | offen | ✅ 20.09. | 23 s (bei 4 s Segmenten) |
+| Windows · Chrome | offen | offen | offen | offen | |
+| Windows · Edge | offen | offen | offen | offen | |
+| Windows · Firefox | offen | offen | offen | offen | |
+| Android · Chrome | offen | offen | offen | offen | |
+| iPhone · Safari | offen | entfällt | offen | offen | |
+| iPad · Safari | offen | entfällt | offen | offen | |
+| Mac · Safari | offen | offen | offen | offen | |
+
+Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
+allein. Deshalb steht dort „entfällt".
+
+### Was der erste Test ergab (20.09.2026)
+
+Die Verzögerung entsteht fast vollständig im Player, nicht auf der VM:
+
+| Abschnitt | Zeit |
+| --- | --- |
+| Ingest, Kodierung, Segmentierung auf der VM | 0,9 s |
+| Rückhalt im Player (drei Segmentlängen laut Spezifikation) | ~22 s |
+| **gemessen insgesamt** | **23 s** |
+
+Daraufhin `hls_segment_duration` von 4 auf 2 gesenkt; erwartet werden 13–17 s. **Noch nicht
+nachgemessen** — das ist der erste Punkt beim nächsten Test.
+
+So misst man den Serveranteil, ohne raten zu müssen: Die Medien-Playlist enthält je Segment ein
+`#EXT-X-PROGRAM-DATE-TIME`. Das Ende des letzten Segments gegen die aktuelle Uhrzeit gerechnet
+ergibt den Rückstand der VM. Alles darüber hinaus ist Player.
+
+CPU mit **einem** Stream im Startprofil: Mittel 25 %, Spitze 28 %. Der Test mit zwei
+gleichzeitigen Streams steht noch aus.
 
 Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
 allein. Die Zeitleiste im Vollbild erscheint dort nur, weil die Playlist vom Typ `EVENT` ist.
@@ -263,6 +287,18 @@ gcloud compute ssh media-vm --zone europe-west3-c --tunnel-through-iap \
 ```
 
 Ab Phase 4 übernimmt das die Automatik.
+
+### Vor jedem Test: VM starten
+
+Zwischen den Terminen ist sie aus. Nach dem Start dauert es etwa eine Minute, bis die VM ihre
+neue IP bei Cloudflare eingetragen hat und die Container laufen.
+
+```bash
+gcloud compute instances start media-vm --zone europe-west3-c --project stream-johannwiebe-de
+
+# warten, bis die DNS-Einträge stimmen:
+watch -n5 'dig +short origin.streaming.johannwiebe.de'
+```
 
 ### VM anhalten und starten
 

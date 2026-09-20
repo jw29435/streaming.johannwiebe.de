@@ -114,13 +114,26 @@ variable "hls_dvr_max_duration" {
 }
 
 variable "hls_segment_duration" {
-  description = "Segmentlänge in Sekunden. Kürzer heißt schneller starten, aber unruhiger bei alten Playern."
+  description = <<-EOT
+    Segmentlänge in Sekunden — der wirksamste Hebel gegen die Verzögerung.
+
+    Player halten sich nach HLS-Spezifikation drei Segmentlängen vom Live-Punkt fern.
+    Mit 4 s sind allein das 12 s; gemessen wurden damit 23 s insgesamt, bei nur 0,9 s
+    Rückstand auf der VM. Die Verzögerung entsteht also fast vollständig im Player.
+
+    2 s halbiert den Rückhalt. Voraussetzung ist, dass OBS alle 2 s ein Schlüsselbild
+    sendet, sonst schneiden die Segmente nicht sauber. Apple empfiehlt 6 s und die
+    OME-Doku warnt vor sehr kurzen Werten bei älteren Playern — deshalb nicht unter 2.
+  EOT
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "hls_segment_count" {
-  description = "Segmente in der Playlist. Erster Hebel gegen zu hohe Verzögerung: auf 4 senken. Nie unter 3."
+  description = <<-EOT
+    Segmente in der Playlist. Nie unter 3, das verlangt die Spezifikation.
+    Gegen die Verzögerung hilft hls_segment_duration deutlich mehr als dieser Wert.
+  EOT
   type        = number
   default     = 5
 }

@@ -146,13 +146,17 @@ docker compose pull
 docker compose up -d --remove-orphans
 docker image prune -f > /dev/null
 
-# Caddy neu aufbauen, nicht nur neu laden. "compose up" merkt eine geänderte
-# eingebundene Datei nicht, und ein "caddy reload" liest zwar das Caddyfile neu,
-# übernimmt aber keine geänderten Umgebungsvariablen aus der .env — die stehen im
-# Container fest. Nur ein neuer Container bekommt beides. Der Ausfall liegt unter
-# einer Sekunde, und Bunny wiederholt die Anfrage.
-echo "--- Caddy neu aufbauen (holt Caddyfile und .env)"
-docker compose up -d --force-recreate caddy
+# Beide Container neu aufbauen, nicht nur neu starten. "compose up" merkt eine
+# geänderte eingebundene Datei nicht — weder das Caddyfile noch die Server.xml.
+# Ein "caddy reload" wiederum liest zwar das Caddyfile neu, übernimmt aber keine
+# geänderten Umgebungsvariablen aus der .env; die stehen im Container fest.
+# Nur ein neuer Container bekommt beides.
+#
+# OME neu aufzubauen trennt einen laufenden Stream. Das ist hier richtig so: Dieses
+# Skript läuft beim Booten oder wenn jemand die Konfiguration geändert hat, und dann
+# soll sie auch wirken. OBS verbindet sich von selbst wieder.
+echo "--- Container neu aufbauen (holt Server.xml, Caddyfile und .env)"
+docker compose up -d --force-recreate
 
 docker compose ps
 echo "=== refresh fertig $(date -Is) ==="
