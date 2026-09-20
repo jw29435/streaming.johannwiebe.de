@@ -17,6 +17,7 @@ set -euo pipefail
 
 PROJECT_ID="${project_id}"
 ONLY="$${1:-}"
+API="http://127.0.0.1:8081/v1/vhosts/default/apps"
 
 read_secret() {
 	local token
@@ -31,27 +32,43 @@ read_secret() {
 # Die Basic-Anmeldung besteht laut OME-Doku aus dem Access-Token allein.
 AUTH=$(read_secret ome-access-token | base64 -w0)
 
-conclude() {
-	local app="$1" stream="$2"
+conclude_app() {
+	local app="$1"
 
 	if [ -n "$ONLY" ] && [ "$ONLY" != "$app" ]; then
 		return 0
 	fi
 
-	echo -n "$app/$stream: "
-	if curl -sf -X POST \
-		-H "Authorization: Basic $AUTH" \
-		-H "Content-Type: application/json" \
-		"http://127.0.0.1:8081/v1/vhosts/default/apps/$app/streams/$stream:concludeHlsLive" \
-		-d '{}' > /dev/null
-	then
-		echo "beendet"
-	else
-		# Kein Fehler: Meistens heißt das schlicht, dass gerade nichts läuft.
-		echo "nicht beendet (sendet dieser Eingang gerade?)"
+	# OME führt einen Stream unter dem Namen, unter dem er hereinkommt — also unter
+	# dem Stream-Key, nicht unter dem öffentlichen Namen aus <OutputStreamName>.
+	# Statt den Namen zu raten, fragen wir OME danach: Das bleibt auch dann richtig,
+	# wenn ein Key gewechselt wurde oder ab Phase 3 die Webhooks die Zuordnung machen.
+	local streams
+	streams=$(curl -sf -H "Authorization: Basic $AUTH" "$API/$app/streams" \
+		| jq -r '.response[]?' 2>/dev/null) || streams=""
+
+	if [ -z "$streams" ]; then
+		echo "$app: kein laufender Eingang"
+		return 0
 	fi
+
+	local stream
+	while read -r stream; do
+		[ -z "$stream" ] && continue
+		printf '%s: ' "$app"
+		if curl -sf -X POST \
+			-H "Authorization: Basic $AUTH" \
+			-H "Content-Type: application/json" \
+			"$API/$app/streams/$stream:concludeHlsLive" \
+			-d '{}' > /dev/null
+		then
+			echo "Playlist beendet"
+		else
+			echo "liess sich nicht beenden"
+		fi
+	done <<< "$streams"
 }
 
 %{ for ch in channels ~}
-conclude "${ch.app}" "${ch.stream}"
+conclude_app "${ch.app}"
 %{ endfor ~}
