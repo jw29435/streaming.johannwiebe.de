@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# Beendet die laufende HLS-Playlist: OME setzt "#EXT-X-ENDLIST" und schaltet den
+# Stream von Live auf Abruf um.
+#
+# Gebraucht wird das nur bei hls_event_playlist = true. Eine EVENT-Playlist darf
+# laut Spezifikation nichts verwerfen, sie wächst also ab Streamstart. Läuft sie
+# über <MaxDuration> hinaus, ohne beendet worden zu sein, reagiert vor allem
+# Safari unvorhersehbar. Deshalb: nach jedem Termin einmal aufrufen.
+#
+#     sudo /opt/media/scripts/conclude.sh            # alle Kanäle
+#     sudo /opt/media/scripts/conclude.sh live1      # nur einer
+#
+# Ab Phase 4 übernimmt das die Automatik.
+
+set -euo pipefail
+
+PROJECT_ID="${project_id}"
+ONLY="$${1:-}"
+
+read_secret() {
+	local token
+	token=$(curl -sf -H "Metadata-Flavor: Google" \
+		"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+		| jq -r .access_token)
+	curl -sf -H "Authorization: Bearer $token" \
+		"https://secretmanager.googleapis.com/v1/projects/$PROJECT_ID/secrets/$1/versions/latest:access" \
+		| jq -r '.payload.data' | base64 -d
+}
+
+# Die Basic-Anmeldung besteht laut OME-Doku aus dem Access-Token allein.
+AUTH=$(read_secret ome-access-token | base64 -w0)
+
+conclude() {
+	local app="$1" stream="$2"
+
+	if [ -n "$ONLY" ] && [ "$ONLY" != "$app" ]; then
+		return 0
+	fi
+
+	echo -n "$app/$stream: "
+	if curl -sf -X POST \
+		-H "Authorization: Basic $AUTH" \
+		-H "Content-Type: application/json" \
+		"http://127.0.0.1:8081/v1/vhosts/default/apps/$app/streams/$stream:concludeHlsLive" \
+		-d '{}' > /dev/null
+	then
+		echo "beendet"
+	else
+		# Kein Fehler: Meistens heißt das schlicht, dass gerade nichts läuft.
+		echo "nicht beendet (sendet dieser Eingang gerade?)"
+	fi
+}
+
+%{ for ch in channels ~}
+conclude "${ch.app}" "${ch.stream}"
+%{ endfor ~}

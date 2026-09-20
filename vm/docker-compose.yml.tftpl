@@ -1,0 +1,46 @@
+# Erzeugt von OpenTofu aus vm/docker-compose.yml.tftpl.
+# Nicht auf der VM bearbeiten — der nächste Start überschreibt die Datei.
+
+services:
+  ome:
+    image: ${ome_image}
+    container_name: ome
+    restart: always
+    # SRT läuft über UDP und verträgt sich schlecht mit der Adressumsetzung im
+    # Bridge-Netz. Im Host-Netz sieht OME die Pakete unverändert.
+    network_mode: host
+    volumes:
+      - /opt/media/ome/Server.xml:/opt/ovenmediaengine/bin/origin_conf/Server.xml:ro
+      - /opt/media/ome/Logger.xml:/opt/ovenmediaengine/bin/origin_conf/Logger.xml:ro
+      # Hier liegen die Segmente zum Zurückspulen, auf der großen Disk.
+      - /var/lib/media/dvr:/dvr
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  caddy:
+    image: ${caddy_image}
+    container_name: caddy
+    restart: always
+    network_mode: host
+    env_file:
+      - /opt/media/.env
+    volumes:
+      - /opt/media/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Benannte Volumes, damit ein Neustart nicht jedes Mal ein neues
+      # Zertifikat bei Let's Encrypt zieht.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ome
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

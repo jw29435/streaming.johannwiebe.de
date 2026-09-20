@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Testseite — streaming.johannwiebe.de</title>
+<meta name="description" content="Phase-1-Testseite für den Durchstich der Media-Pipeline.">
+
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video-js.min.css"
+      integrity="sha512-uki7RYRF8BrCB9BB7r6BvPTb/HzpCFwSwRoTvdq0pMh0M7CbIMNPrDzZdIbqrx27JkGw2/h8va1X6QAZSKTRvg=="
+      crossorigin="anonymous" referrerpolicy="no-referrer">
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #12141a;
+    --panel: #1c1f27;
+    --line: #2e3340;
+    --text: #e8eaef;
+    --muted: #9aa1b1;
+    --accent: #4c8dff;
+    --ok: #3ecf8e;
+    --warn: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
+
+  .player-wrap { background: #000; border-radius: 10px; overflow: hidden; }
+  .video-js { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 12px 0;
+  }
+  button, select, input {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 14px;
+    min-height: 44px;           /* große Bedienelemente fürs Handy */
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  input[type="url"] { flex: 1 1 320px; min-width: 0; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 16px;
+  }
+  .panel h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+  code { background: #0d0f14; padding: 2px 6px; border-radius: 4px; font-size: 0.87em; word-break: break-all; }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Testseite — Phase 1</h1>
+  <p class="sub">Durchstich der Media-Pipeline: OBS → SRT → OvenMediaEngine → Caddy → Bunny CDN → HLS.</p>
+
+  <div class="player-wrap">
+    <video id="player" class="video-js vjs-big-play-centered"
+           controls playsinline muted preload="auto"
+           x-webkit-airplay="allow"></video>
+  </div>
+
+  <div class="bar">
+    <button id="unmute" class="primary">🔊 Ton an</button>
+    <select id="channel" aria-label="Kanal"></select>
+    <select id="quality" aria-label="Qualität" disabled></select>
+    <button id="golive">Zum Live-Punkt</button>
+  </div>
+
+  <div class="bar">
+    <input type="url" id="customUrl" placeholder="Andere HLS-Adresse …" spellcheck="false">
+    <button id="load">Laden</button>
+  </div>
+
+  <section class="panel">
+    <h2>Messwerte</h2>
+    <dl>
+      <dt>Adresse</dt><dd><code id="mUrl">—</code></dd>
+      <dt>Zustand</dt><dd id="mState">wartet</dd>
+      <dt>Wiedergabe</dt><dd id="mTech">—</dd>
+      <dt>Stufe</dt><dd id="mLevel">—</dd>
+      <dt>Rückstand zum Live-Punkt</dt><dd id="mLatency">—</dd>
+      <dt>Zurückspulbar</dt><dd id="mDvr">—</dd>
+      <dt>Playlist-Typ</dt><dd id="mType">—</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Was hier geprüft wird</h2>
+    <ul>
+      <li>Start, Vollbild, Qualitätswechsel und Zurückspulen auf allen Testgeräten.</li>
+      <li>„Rückstand zum Live-Punkt“ soll unter 25 Sekunden bleiben.</li>
+      <li>Auf iPhone und iPad spielt Safari HLS selbst ab und übernimmt im Vollbild die
+          eigenen Bedienelemente. Die Zeitleiste erscheint dort nur, weil die Playlist
+          vom Typ <code>EVENT</code> ist; ein Qualitätsmenü gibt es dort nicht, Safari
+          wählt die Stufe selbst.</li>
+    </ul>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video.min.js"
+        integrity="sha512-sRxq4fhpy/EbkRIr8G96Fi2Do/qScfr9XlG5NbtBl3Gsgh+x/oWTw/nWgW03SuD7w2TZGVrQHpScJeNPVrAQzQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'https://live.streaming.johannwiebe.de';
+  var CHANNELS = [
+    { label: 'Kanal 1 (live1)', url: BASE + '/live1/kanal1/ts:master.m3u8' },
+    { label: 'Kanal 2 (live2)', url: BASE + '/live2/kanal2/ts:master.m3u8' }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var player = videojs('player', {
+    // Zeitleiste und Live-Knopf zum Zurückspulen.
+    liveui: true,
+    // Der erste Abschnitt kommt in der kleinsten Stufe, danach steigt der Player
+    // selbst. Das macht den Start auf schwachen Leitungen deutlich schneller.
+    html5: { vhs: { enableLowInitialPlaylist: true } },
+    playsinline: true,
+    autoplay: true,
+    muted: true,
+    fluid: false,
+    controlBar: { pictureInPictureToggle: true }
+  });
+
+  // -------------------------------------------------------------- Kanalwahl
+  CHANNELS.forEach(function (c, i) {
+    var o = document.createElement('option');
+    o.value = c.url;
+    o.textContent = c.label;
+    if (i === 0) { o.selected = true; }
+    $('channel').appendChild(o);
+  });
+
+  function load(url) {
+    if (!url) { return; }
+    $('mUrl').textContent = url;
+    $('mState').textContent = 'lädt …';
+    $('mLevel').textContent = '—';
+    $('mType').textContent = '—';
+    try { localStorage.setItem('lastUrl', url); } catch (e) { /* egal */ }
+
+    player.src({ src: url, type: 'application/x-mpegURL' });
+    player.play().catch(function () { /* Autostart darf scheitern */ });
+  }
+
+  $('channel').addEventListener('change', function () { load(this.value); });
+  $('load').addEventListener('click', function () { load($('customUrl').value.trim()); });
+  $('customUrl').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { load(this.value.trim()); }
+  });
+
+  // ------------------------------------------------------------------- Ton
+  $('unmute').addEventListener('click', function () {
+    player.muted(false);
+    player.volume(1);
+    player.play().catch(function () {});
+    updateSoundButton();
+  });
+
+  function updateSoundButton() {
+    var b = $('unmute');
+    if (player.muted()) {
+      b.textContent = '🔊 Ton an';
+      b.classList.add('primary');
+    } else {
+      b.textContent = '🔇 Ton aus';
+      b.classList.remove('primary');
+    }
+  }
+  player.on('volumechange', updateSoundButton);
+
+  // -------------------------------------------------------------- Live-Punkt
+  $('golive').addEventListener('click', function () {
+    var s = player.seekable();
+    if (s && s.length) { player.currentTime(s.end(s.length - 1)); }
+    player.play().catch(function () {});
+  });
+
+  // --------------------------------------------------------- Qualitätsmenü
+  // Nur wo der Browser HLS selbst zusammensetzt (Chrome, Edge, Firefox, Android).
+  // Safari auf iPhone und iPad spielt nativ ab und entscheidet selbst.
+  function levels() {
+    if (typeof player.qualityLevels === 'function') {
+      try { return player.qualityLevels(); } catch (e) { /* weiter unten */ }
+    }
+    return null;
+  }
+
+  function buildQualityMenu() {
+    var sel = $('quality');
+    var q = levels();
+
+    if (!q || q.length < 2) {
+      sel.innerHTML = '<option>Qualität: automatisch</option>';
+      sel.disabled = true;
+      return;
+    }
+
+    sel.innerHTML = '';
+    var auto = document.createElement('option');
+    auto.value = 'auto';
+    auto.textContent = 'Automatisch';
+    sel.appendChild(auto);
+
+    for (var i = 0; i < q.length; i++) {
+      var l = q[i];
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = (l.height ? l.height + 'p' : 'Stufe ' + (i + 1)) +
+                      (l.bitrate ? ' · ' + Math.round(l.bitrate / 1000) + ' kbit/s' : '');
+      sel.appendChild(o);
+    }
+    sel.disabled = false;
+  }
+
+  $('quality').addEventListener('change', function () {
+    var q = levels();
+    if (!q) { return; }
+    var pick = this.value;
+    for (var i = 0; i < q.length; i++) {
+      q[i].enabled = (pick === 'auto') || (String(i) === pick);
+    }
+  });
+
+  player.on('loadedmetadata', buildQualityMenu);
+
+  // ----------------------------------------------------------- Zustandsanzeige
+  player.on('playing', function () { $('mState').textContent = 'läuft'; });
+  player.on('waiting', function () { $('mState').textContent = 'puffert …'; });
+  player.on('pause',   function () { $('mState').textContent = 'angehalten'; });
+  player.on('error', function () {
+    var e = player.error();
+    $('mState').innerHTML = '<span class="warn">Fehler: ' +
+      (e ? (e.message || ('Code ' + e.code)) : 'unbekannt') + '</span>';
+  });
+
+  function fmt(sec) {
+    if (!isFinite(sec) || sec < 0) { return '—'; }
+    var m = Math.floor(sec / 60), s = Math.round(sec % 60);
+    return m > 0 ? m + ' min ' + s + ' s' : s + ' s';
+  }
+
+  setInterval(function () {
+    // Rückstand zum Live-Punkt: Abstand zwischen Abspielposition und dem
+    // jüngsten Punkt, den der Player kennt. Die echte Verzögerung ist etwas
+    // größer, weil Ingest und Kodierung davorliegen — mit der Stoppuhr prüfen.
+    var s = player.seekable();
+    if (s && s.length) {
+      var end = s.end(s.length - 1);
+      var start = s.start(0);
+      var behind = end - player.currentTime();
+
+      $('mLatency').innerHTML = behind < 25
+        ? '<span class="ok">' + fmt(behind) + '</span>'
+        : '<span class="warn">' + fmt(behind) + '</span>';
+      $('mDvr').textContent = fmt(end - start);
+    }
+
+    if ($('mTech').textContent === '—') {
+      var vhs = player.tech(true) && player.tech(true).vhs;
+      $('mTech').textContent = vhs
+        ? 'Video.js baut den Stream zusammen (MSE)'
+        : 'Browser spielt HLS selbst ab (nativ)';
+    }
+
+    var q = levels();
+    if (q && q.selectedIndex >= 0 && q[q.selectedIndex]) {
+      var cur = q[q.selectedIndex];
+      $('mLevel').textContent = (cur.height ? cur.height + 'p' : '—') +
+        (cur.bitrate ? ' · ' + Math.round(cur.bitrate / 1000) + ' kbit/s' : '');
+    }
+  }, 1000);
+
+  // Playlist-Typ direkt aus der Datei lesen — zeigt, ob EVENT wirklich ankommt.
+  player.on('loadstart', function () {
+    var url = player.currentSrc();
+    if (!url) { return; }
+    fetch(url, { cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (text) {
+        // Die Master-Playlist verweist nur; der Typ steht in der Medien-Playlist.
+        var rel = text.split('\n').find(function (l) { return l && l[0] !== '#'; });
+        if (!rel) { return; }
+        return fetch(new URL(rel, url).href, { cache: 'no-store' }).then(function (r) { return r.text(); });
+      })
+      .then(function (media) {
+        if (!media) { return; }
+        var m = media.match(/#EXT-X-PLAYLIST-TYPE:\s*(\w+)/);
+        $('mType').textContent = m ? m[1] : 'gleitendes Fenster (kein Typ gesetzt)';
+      })
+      .catch(function () { $('mType').textContent = 'nicht lesbar (CORS?)'; });
+  });
+
+  // ------------------------------------------------------------------ Start
+  var saved = null;
+  try { saved = localStorage.getItem('lastUrl'); } catch (e) { /* egal */ }
+  load(saved || CHANNELS[0].url);
+  updateSoundButton();
+}());
+</script>
+</body>
+</html>

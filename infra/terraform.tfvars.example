@@ -1,0 +1,26 @@
+# Kopieren nach terraform.tfvars und ausfüllen. Die echte Datei schließt .gitignore aus.
+#
+# Nur diese beiden Werte kommen von Hand. Stream-Keys, X-Origin-Auth und das
+# OME-Access-Token erzeugt Terraform selbst und legt sie in Secret Manager ab;
+# abrufbar mit "tofu output -json".
+
+# Cloudflare: Mein Profil → API-Tokens → Token erstellen → "DNS bearbeiten".
+# Berechtigung: Zone → DNS → Bearbeiten. Zonenressourcen: nur johannwiebe.de.
+cloudflare_api_token = "hier-einsetzen"
+
+# Bunny: Konto → API → API-Schlüssel.
+bunny_api_key = "hier-einsetzen"
+
+# ---------------------------------------------------------------------------
+# Ausbaustufe. Auskommentiert gelten die Standardwerte des Startprofils.
+# ---------------------------------------------------------------------------
+
+# machine_type    = "c3-standard-8"   # Normalprofil
+# ip_type         = "static"          # feste IP, ab dem Normalprofil
+# quality_profile = "normal"          # zusätzlich 480p
+
+# Gleitendes 10-Minuten-Fenster statt EVENT-Playlist. Achtung: Dann fehlt im
+# iPhone-Vollbild die Zeitleiste zum Zurückspulen.
+# hls_event_playlist   = false
+# hls_dvr_max_duration = 600
+# disk_size_gb         = 20

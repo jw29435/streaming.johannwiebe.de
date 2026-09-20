@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# Startskript aus den VM-Metadaten. Läuft bei jedem Start der Maschine und hält
+# sich bewusst kurz: Docker einrichten, refresh.sh holen, als Dienst starten.
+# Alles Weitere steht in refresh.sh und kommt damit aus dem Konfig-Bucket.
+
+set -euo pipefail
+exec > >(tee -a /var/log/media-startup.log) 2>&1
+echo "=== Startskript $(date -Is) ==="
+
+CONFIG_BUCKET="${config_bucket}"
+INSTALL_DIR=/opt/media
+
+install -d -m 0755 "$INSTALL_DIR"
+
+if ! command -v docker >/dev/null 2>&1; then
+	echo "--- Docker installieren"
+	export DEBIAN_FRONTEND=noninteractive
+	apt-get update -y
+	apt-get install -y ca-certificates curl gnupg jq
+
+	install -m 0755 -d /etc/apt/keyrings
+	curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+	chmod a+r /etc/apt/keyrings/docker.asc
+
+	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+		> /etc/apt/sources.list.d/docker.list
+
+	apt-get update -y
+	apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+fi
+
+command -v jq >/dev/null 2>&1 || { apt-get update -y && apt-get install -y jq; }
+
+systemctl enable --now docker
+
+echo "--- refresh.sh holen"
+GTOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+	"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+	| jq -r .access_token)
+
+curl -sf -H "Authorization: Bearer $GTOKEN" \
+	"https://storage.googleapis.com/storage/v1/b/$CONFIG_BUCKET/o/scripts%2Frefresh.sh?alt=media" \
+	-o "$INSTALL_DIR/refresh.sh"
+chmod 0755 "$INSTALL_DIR/refresh.sh"
+
+echo "--- Dienst einrichten"
+cat > /etc/systemd/system/media.service <<'UNIT'
+[Unit]
+Description=OvenMediaEngine und Caddy
+Documentation=https://github.com/jw29435/streaming.johannwiebe.de
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/media/refresh.sh
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable media.service
+systemctl restart media.service
+
+echo "=== Startskript fertig $(date -Is) ==="

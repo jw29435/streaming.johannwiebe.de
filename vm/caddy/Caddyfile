@@ -1,0 +1,56 @@
+# Origin-Proxy vor OvenMediaEngine.
+# Die Werte in {$...} kommen aus /opt/media/.env, das refresh.sh beim Booten schreibt.
+{
+	# Die Admin-Schnittstelle wird hier nicht gebraucht.
+	admin off
+
+	# Wer Ablaufwarnungen von Let's Encrypt möchte, trägt hier eine Adresse ein.
+	# email name@example.org
+}
+
+{$ORIGIN_HOST} {
+	# Ohne den geheimen Header kommt die Anfrage nicht von Bunny.
+	@unauthorized not header X-Origin-Auth "{$ORIGIN_AUTH}"
+	@preflight method OPTIONS
+	@playlist path *.m3u8
+	@segment path *.ts
+
+	# "route" erzwingt genau diese Reihenfolge. Ohne den Block würde Caddy nach
+	# seiner eigenen Rangfolge arbeiten, in der reverse_proxy vor respond kommt —
+	# die 403 käme dann nie zum Zug.
+	route {
+		respond @unauthorized "Forbidden" 403
+
+		header {
+			# Nur die eigene Seite darf das Video einbinden.
+			Access-Control-Allow-Origin "{$SITE_ORIGIN}"
+			Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+			Access-Control-Allow-Headers "Range"
+			Access-Control-Expose-Headers "Content-Length, Content-Range"
+			Vary "Origin"
+			-Server
+		}
+
+		# Playlists ändern sich ständig, Segmente nie. Bunny übernimmt diese
+		# Werte, weil die Pull Zone auf "Cache-Control des Origin beachten" steht.
+		header @playlist Cache-Control "public, max-age=2"
+		header @segment Cache-Control "public, max-age=3600"
+
+		respond @preflight 204
+
+		reverse_proxy 127.0.0.1:13333
+	}
+
+	# Das Zugriffsprotokoll geht nach stdout und damit in Dockers Log, das in
+	# docker-compose.yml schon begrenzt ist. Der geheime Header wird herausgefiltert,
+	# damit er nicht im Klartext im Protokoll steht.
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				request>headers>X-Origin-Auth delete
+			}
+		}
+	}
+}
