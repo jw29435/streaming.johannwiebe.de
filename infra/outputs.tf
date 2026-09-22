@@ -29,11 +29,16 @@ output "dns_records" {
 }
 
 output "playback_urls" {
-  description = "Adressen für die Testseite und zum Prüfen mit curl."
-  value = {
-    for c in var.ingest_channels :
-    c.app => "https://${local.live_host}/${c.app}/${c.stream}/ts:master.m3u8"
-  }
+  description = "Adressen der Eingänge, zum Prüfen mit curl."
+  value       = local.playback_urls
+}
+
+output "seiten" {
+  description = "Die festen Ausgangsseiten und die Regieansicht."
+  value = merge(
+    { for o in var.outputs : o.title => "https://${var.base_domain}/${o.name}" },
+    { "Regie" = "https://${var.base_domain}/admin/regie" }
+  )
 }
 
 output "obs_srt_urls" {

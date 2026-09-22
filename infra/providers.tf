@@ -24,6 +24,13 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
+
+  # Die Firebase-APIs — hier firebaserules — verlangen ein Kontingentprojekt im
+  # Kopf jeder Anfrage. Ohne das schlagen sie mit 403 "requires a quota project"
+  # fehl, je nachdem wie die Anmeldedaten auf dem Rechner eingerichtet sind.
+  # Belastet wird dasselbe Projekt, in dem auch alles andere liegt.
+  user_project_override = true
+  billing_project       = var.project_id
 }
 
 provider "cloudflare" {

@@ -16,10 +16,17 @@ englisch, damit sie zu den Werkzeugen passen.
 
 ## Aktueller Stand
 
-Phase 1 (Durchstich der Media-Pipeline). Die Infrastruktur ist ausgerollt und die Pipeline
-trägt: Am 20.09.2026 kam ein OBS-Stream per SRT an, lief über Bunny als HLS und war über die
-ganze Streamdauer zurückspulbar. **Die VM ist seitdem heruntergefahren**, damit sie nichts
-kostet — vor dem nächsten Test starten.
+Phase 2 ist **ausgerollt** (22.09.2026): Firestore-Datenbank in `europe-west3`, Regeln aktiv,
+Eingänge, Ausgänge und Presets angelegt, Seiten auf Firebase Hosting. Geprüft ohne Anmeldung:
+`public` liefert 200, `outputs`, `inputs`, `presets` und `inputSecrets` liefern 403 — die Regeln
+greifen. Phase 1 trägt seit dem 20.09.2026.
+
+Danach lief ein **vollständiger** `tofu apply` vom Linux-Rechner: 0 hinzugefügt, 0 geändert,
+0 gelöscht — Cloudflare und Bunny sind damit ebenfalls geprüft und driftfrei. Einzige
+Abweichung: `google_compute_instance.media` hat keine IP mehr, weil die VM aus ist. Das ist
+erwartet, `vm_ip` steht deshalb leer im State.
+
+**Die VM ist heruntergefahren**, damit sie nichts kostet — vor dem nächsten Test starten.
 
 Alles, was ohne fremde Geräte prüfbar ist, ist abgenommen: CPU bei zwei gleichzeitigen
 Streams 31 % im Mittel und 35 % in der Spitze, Rückstand der VM 1,5–2,1 s, RTMP als
@@ -27,17 +34,17 @@ Rückfallebene, die drei Qualitätsstufen, die EVENT-Playlist und `conclude.sh`.
 `scripts/abnahme.sh` prüft diese Punkte in einem Durchlauf gegen die laufende Kette und
 gehört vor jeden Test.
 
-Offen ist nur noch der Gerätedurchlauf mit laufendem Stream: Start, Vollbild,
-Qualitätswechsel und Zurückspulen auf iPhone, Android, Windows (Edge, Firefox) und MacBook,
-dazu die Verzögerung im echten Player. Die Testseite rechnet sie selbst aus, eine Stoppuhr
-ist nicht nötig. **Ein iPad steht nicht zur Verfügung** — dieses Kriterium aus dem Konzept
-bleibt offen; das iPhone prüft dieselbe WebKit-Engine, aber nicht das größere Vollbild-Layout
-von iPadOS. Die Tabelle in der README hält den Stand fest.
+Am 22.09.2026 liefen Windows (Edge, Firefox) und das iPhone durch, **das iPhone im Vollbild
+mit Zeitleiste** — die EVENT-Playlist trägt also. Offen bleiben Android, Mac · Safari und die
+Verzögerung im echten Player nach der Umstellung auf 2-Sekunden-Segmente (erwartet rund 17 s,
+gemessen nie). **Ein iPad steht nicht zur Verfügung** — dieses Kriterium aus dem Konzept bleibt
+offen; das iPhone prüft dieselbe WebKit-Engine, aber nicht das größere Vollbild-Layout von
+iPadOS. Die Tabellen in der README halten den Stand fest, für Phase 1 und Phase 2 getrennt.
 
 | Phase | Inhalt | Stand |
 | --- | --- | --- |
-| 1 | VM mit OME und Caddy, ein Test-Eingang, Bunny, Testseite | in Arbeit |
-| 2 | Web-App, feste Ausgangsseiten, Routing | offen |
+| 1 | VM mit OME und Caddy, ein Test-Eingang, Bunny, Testseite | Gerätetest offen |
+| 2 | Web-App, feste Ausgangsseiten, Routing | ausgerollt, Gerätetest offen |
 | 3 | Konten, Rollen, Stream-Keys, Webhooks | offen |
 | 4 | Zeitplan, Automatik, Alarme, Lasttest | offen |
 | 5 | Umstieg von AVideo | offen |
@@ -70,9 +77,17 @@ Zertifikate von Firebase und Bunny durch.
 
 ```
 docs/konzept.md   Konzept, maßgeblich
-infra/            OpenTofu/Terraform: VM, Firewall, Dienstkonto, Secrets, Bunny
+infra/            OpenTofu/Terraform: VM, Firewall, Dienstkonto, Secrets, Bunny,
+                  Firestore mit Regeln und Stammdaten
 vm/               Docker Compose, OME-Konfiguration, Caddyfile, Startskripte
-web/              Testseite mit Video.js auf Firebase Hosting
+web/public/       Seiten auf Firebase Hosting, ohne Build-Schritt
+  index.html        Übersicht der Ausgänge
+  ausgang.html      /<ausgang> und /embed/<ausgang>, Video.js
+  regie.html        /admin/regie
+  test.html         Testseite aus Phase 1 mit den Messwerten
+  app/routing.js    Auflösung Preset + Override → Eingang, reine Funktionen
+  app/daten.js      Firestore-Zugang, eine Stelle für Version und Konfiguration
+web/test/         routing.test.mjs: prüft die Auflösung ohne Browser
 scripts/          abnahme.sh: prüft die messbaren Abnahmepunkte vom eigenen Rechner aus
 ```
 
@@ -85,6 +100,7 @@ Nie `latest` verwenden. Updates nur an einem Nicht-Streamtag, mit Test.
 | OvenMediaEngine | `airensoft/ovenmediaengine:v0.21.0` | 2026-08-13 |
 | Caddy | `caddy:2.11.4` | 2026-09-18 |
 | Video.js | `8.24.1` | – |
+| Firebase JS SDK | `12.19.0` (von `gstatic.com`) | 2026-09-22 |
 | Bunny-Provider | `BunnyWay/bunnynet` `0.18.2` | 2026-08-26 |
 
 ## Festlegungen aus der Recherche
@@ -116,6 +132,58 @@ Ergebnisse der in der Phase-1-Aufgabe geforderten Prüfungen, jeweils an der Que
   `cache_expiration_time = -1` bedeutet „Cache-Control des Origin beachten". Für den geheimen
   Header zum Origin gibt es kein eigenes Feld; er läuft über eine Edge Rule mit der Aktion
   `SetRequestHeader`. Origin Shield steht in Europa nur als `FR` zur Verfügung.
+
+## Festlegungen für Phase 2
+
+Das Konzept sieht für Phase 2 React, TypeScript und Vite plus eine Cloud-Run-API unter `/api`
+vor. Gebaut ist es schlanker, nach Prüfung und Freigabe am 22.09.2026. Die Begründung gehört
+hierher, damit sie nicht in jeder Sitzung neu verhandelt wird.
+
+- **Keine API in Phase 2.** Sie bräuchte sie für genau eine Aufgabe: `public/{name}` neu zu
+  berechnen. Das macht die Regieansicht in einem `writeBatch`, abgesichert über die
+  Firestore-Regeln. **Phase 3 braucht die API dann zwingend** — AdmissionWebhooks, Key-Rotation
+  und Custom Claims gehen nur serverseitig. Der Umbau ist klein, weil die Auflösung als reine
+  Funktion in `web/public/app/routing.js` liegt und dort unverändert in Node läuft. Zu ändern
+  sind dann: das Innenleben von `anwenden()` in `regie.html` und die Schreibregeln.
+  Die Konzeptfrage, ob der Hosting-Rewrite mit Cloud Run in `europe-west3` geht, ist damit
+  **noch offen** und gehört an den Anfang von Phase 3.
+- **Kein Framework in den Zuschauerseiten, auch später nicht.** `ausgang.html` ist ein
+  Video-Element und ein Firestore-Listener; Video.js ist dort schon der schwerste Brocken.
+  React gehört unter `/admin`, wenn Phase 3 die Formularansichten bringt — nicht davor.
+- **Die Firebase-Konfiguration kommt aus `/__/firebase/init.json`.** Firebase Hosting liefert
+  sie selbst aus, sobald im Projekt eine Web-App registriert ist. Deshalb liegt kein Schlüssel
+  im Repo und es gibt keine erzeugte Datei im Deploy. Fehlt die Web-App, bleiben die Seiten
+  leer — der erste Punkt bei der Fehlersuche.
+- **Chromecast braucht das Cast-SDK.** Die Remote-Playback-API des Browsers wäre der schlankere
+  Weg, kann aber keine MSE-Quelle weiterreichen — und Chrome spielt HLS über MSE ab. AirPlay
+  dagegen kann Safari selbst (`webkitShowPlaybackTargetPicker`), dort genügen drei Zeilen.
+- **Die Google-Anmeldung wird von Hand eingeschaltet.** Als Code ginge das nur über Identity
+  Platform, und das ändert Abrechnung und Verhalten des Projekts. Steht als Schritt 7 in der
+  README. Eine **Web-App muss dagegen nicht registriert werden**: Am 22.09.2026 lieferte
+  `/__/firebase/init.json` bereits `apiKey`, `authDomain` und `projectId`, obwohl
+  `firebase apps:list` „No apps found" meldet — das genügt für Firestore und Auth.
+- **Anmeldung mit E-Mail und Passwort ist gewünscht** — abweichend vom Konzept, das
+  „passwortlos per E-Mail-Link oder mit Google-Konto" vorsieht. Der Anbieter ist in Firebase
+  Auth seit dem 22.09.2026 eingeschaltet; die Regieansicht bietet bislang nur Google an, der
+  Rest gehört zu Phase 3. Beim Nachrüsten zwei Dinge beachten: `signInWithEmailAndPassword`
+  genügt nicht allein — ohne bestätigte Adresse scheitert jeder Schreibvorgang an
+  `email_verified` in den Regeln, also gehört `sendEmailVerification` dazu. Und wer ein Konto
+  anlegen darf, muss die API begrenzen, sonst kann sich jeder registrieren; ab Phase 3 legt der
+  Admin Konten per Einladung an.
+- **Die Firestore-Datenbank überlebt `tofu destroy`** (`deletion_policy = "ABANDON"`). Sie hält
+  das Routing und kostet ohne Zugriffe praktisch nichts.
+- **`iam.googleapis.com` war nie aktiviert** und fehlte in `apis.tf`, obwohl Phase 1 ein
+  Dienstkonto anlegt. Aufgefallen ist es erst durch `user_project_override`: Sobald der Provider
+  das Kontingent gegen dieses Projekt bucht, prüft Google auch, ob die API dort aktiv ist. Steht
+  jetzt in der Liste.
+- **Der google-Provider trägt `user_project_override` und `billing_project`.** Ohne das
+  antwortet `firebaserules.googleapis.com` mit 403 „requires a quota project" — die Firebase-APIs
+  verlangen das Kontingentprojekt im Kopf jeder Anfrage, und ob es gesetzt ist, hängt davon ab,
+  wie die Anmeldedaten auf dem Rechner eingerichtet sind. Belastet wird dasselbe Projekt.
+- **Ohne ADC geht es auch:** `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"` vor
+  dem `tofu`-Befehl reicht für einen Lauf (Token gilt eine Stunde). Dauerhaft ist
+  `gcloud auth application-default login` richtig — das öffnet einen Browser und muss von Hand
+  laufen.
 
 ## Offene Schwachstelle bis Phase 3
 
@@ -168,20 +236,36 @@ Solange das so ist:
   unverändert durchgereicht, kostet also keine Rechenleistung, aber bei 3.000 kbit/s ist 60 fps
   ein Qualitätsnachteil gegenüber 30. Vor Phase 2 klären.
 
-## Werkzeuge auf diesem Rechner
+## Werkzeuge
 
-- `gcloud` (585.0.0) angemeldet als johannwiebe29@gmail.com, Standard-Anmeldedaten vorhanden.
-  **Kein Standardprojekt gesetzt** — auf dem Rechner liegen 24 Projekte, deshalb trägt jeder
-  Befehl `--project stream-johannwiebe-de`.
-- `gh` angemeldet als jw29435.
-- `tofu` 1.12.6 und `caddy` 2.11.4 installiert (Caddy nur als Syntaxprüfer für das Caddyfile).
-- `node` 26.9.0, `npm` 11.19.1, `firebase` 15.30.2. Node war gegen `libada.3` gelinkt, während
-  Homebrew schon `libada.4` führte; `brew reinstall node` hat 26.9.0 aus dem Quelltext gebaut
-  (dauert etwa eine Stunde, es gab kein Bottle).
-- **Die Firebase-CLI ist nicht angemeldet.** Sie hat eine eigene Anmeldung, `gcloud` genügt ihr
-  nicht — `firebase login` öffnet den Browser und muss von Hand laufen. Ohne das geht Deploy nur
-  über die Hosting-REST-API.
-- `docker` fehlt lokal; gebraucht wird es nur auf der VM.
+Das Projekt wird von **zwei Rechnern** aus bedient. Was hier steht, gilt je Rechner —
+Unterschiede haben schon einmal Zeit gekostet.
+
+**Beide:** `gcloud` angemeldet als johannwiebe29@gmail.com mit Standard-Anmeldedaten.
+**Kein Standardprojekt gesetzt** — es liegen zwei Dutzend Projekte darauf, deshalb trägt jeder
+Befehl `--project stream-johannwiebe-de`. `docker` fehlt auf beiden; gebraucht wird es nur auf
+der VM.
+
+| | Mac | Linux (WSL) |
+| --- | --- | --- |
+| `gcloud` | 585.0.0 | 574.0.0 |
+| `tofu` | 1.12.6 | 1.12.6 in `~/.local/bin`, am 22.09.2026 von Hand aus dem GitHub-Release |
+| `caddy` | 2.11.4, nur als Syntaxprüfer fürs Caddyfile | fehlt |
+| `node` / `npm` | 26.9.0 / 11.19.1 | 20.20.2 / 10.8.2 |
+| `firebase` | 15.30.2, **nicht angemeldet** | 15.26.0, **angemeldet** |
+| `gh` | angemeldet als jw29435 | – |
+| `infra/terraform.tfvars` | vorhanden | **fehlt**, siehe unten |
+
+- Auf dem Mac war `node` gegen `libada.3` gelinkt, während Homebrew schon `libada.4` führte;
+  `brew reinstall node` hat 26.9.0 aus dem Quelltext gebaut (etwa eine Stunde, kein Bottle).
+- Die Firebase-CLI hat eine **eigene** Anmeldung, `gcloud` genügt ihr nicht. Auf dem Mac läuft
+  Deploy deshalb nur nach `firebase login` von Hand oder über die Hosting-REST-API.
+- **`terraform.tfvars` liegt nur auf dem Mac.** Sie enthält zwei Werte: `cloudflare_api_token`
+  lässt sich jederzeit aus Secret Manager holen
+  (`gcloud secrets versions access latest --secret cloudflare-dns-token`), **`bunny_api_key`
+  dagegen nicht** — der steht nirgends in der Cloud und kommt nur aus der Bunny-Oberfläche
+  (*Account → API*). Ohne ihn lässt sich alles anwenden, was nicht Bunny ist; für einen
+  vollständigen `tofu apply` muss er vorliegen.
 
 ## Arbeitsweise
 

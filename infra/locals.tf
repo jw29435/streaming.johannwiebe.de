@@ -26,4 +26,37 @@ locals {
     },
     { for app, key in random_password.stream_key : "stream-key-${app}" => key.result }
   )
+
+  # Wiedergabeadressen je Eingang. Stehen als Terraform-Output für die
+  # Fehlersuche und gehen zugleich nach Firestore, damit die Ausgangsseiten sie
+  # nicht selbst zusammensetzen müssen.
+  playback_urls = {
+    for c in var.ingest_channels :
+    c.app => "https://${local.live_host}/${c.app}/${c.stream}/ts:master.m3u8"
+  }
+
+  # Startpresets: "Normal" schickt jeden Ausgang auf seinen Standard-Eingang,
+  # dazu je Eingang eines, das alle Ausgänge darauf legt. Mehr braucht Phase 2
+  # nicht; ab Phase 3 pflegt der Admin sie in der Oberfläche.
+  presets = merge(
+    {
+      "normal" = {
+        title   = "Normal"
+        order   = 0
+        mapping = { for o in var.outputs : o.name => o.default_input }
+      }
+    },
+    {
+      for i, c in var.ingest_channels :
+      "alle-${c.app}" => {
+        title   = "Alles auf ${c.app}"
+        order   = i + 1
+        mapping = { for o in var.outputs : o.name => c.app }
+      }
+    }
+  )
+
+  firestore_rules = templatefile("${path.module}/firestore.rules.tftpl", {
+    admin_emails = join(", ", [for e in var.admin_emails : "\"${e}\""])
+  })
 }

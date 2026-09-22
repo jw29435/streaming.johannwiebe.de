@@ -1,8 +1,10 @@
-# streaming.johannwiebe.de — Phase 1
+# streaming.johannwiebe.de
 
-Der Durchstich der Media-Pipeline: Ein OBS-Stream kommt per SRT an, OvenMediaEngine rechnet ihn
-in mehrere Stufen um, Caddy liefert ihn als HLS aus, Bunny CDN verteilt ihn, und eine Testseite
-auf Firebase Hosting spielt ihn ab — mit Zurückspulen.
+Ein OBS-Stream kommt per SRT an, OvenMediaEngine rechnet ihn in mehrere Stufen um, Caddy
+liefert ihn als HLS aus, Bunny CDN verteilt ihn, und feste Seiten auf Firebase Hosting spielen
+ihn ab — mit Zurückspulen. Welcher Eingang auf welcher Seite läuft, schaltet die Regie.
+
+**Phase 1** (Media-Pipeline) und **Phase 2** (Ausgangsseiten und Routing) stehen.
 
 ```
 OBS ──SRT/RTMP──▶ Media-VM (europe-west3) ──HLS──▶ Bunny CDN ──▶ Zuschauer
@@ -18,6 +20,16 @@ Das vollständige Konzept steht in [docs/konzept.md](docs/konzept.md), der Proje
 | `origin.streaming.johannwiebe.de` | nur Bunny holt hier ab, alles andere bekommt 403 |
 | `live.streaming.johannwiebe.de` | Video für Zuschauer |
 | `streaming.johannwiebe.de` | Seiten auf Firebase Hosting |
+
+Die Seiten darunter:
+
+| Adresse | Wofür |
+| --- | --- |
+| `/<ausgang>` | feste Zuschauerseite, z. B. `/hauptsaal`. Die Adresse ändert sich nie. |
+| `/embed/<ausgang>` | dieselbe Seite ohne Drumherum, für `<iframe>` |
+| `/admin/regie` | Regieansicht: Preset tippen, einzeln schalten |
+| `/` | Übersicht aller Ausgänge |
+| `/test` | Testseite aus Phase 1 mit den Messwerten |
 
 ---
 
@@ -89,6 +101,20 @@ cloudflare_api_token = "…"
 bunny_api_key        = "…"
 ```
 
+Für Phase 2 kommen zwei optionale Werte dazu. Ohne sie gelten die Standardwerte aus
+`variables.tf` — zwei Ausgänge `hauptsaal` und `nebenraum` und eine Admin-Adresse:
+
+```hcl
+outputs = [
+  { name = "hauptsaal", title = "Hauptsaal", default_input = "live1" },
+  { name = "nebenraum", title = "Nebenraum", default_input = "live2" },
+]
+admin_emails = ["johannwiebe29@gmail.com"]
+```
+
+**Der Name eines Ausgangs steht in seiner Adresse und wird später nicht mehr geändert** —
+verteilte Links sollen weiter stimmen. `admin`, `api` und `embed` sind reserviert.
+
 Die Stream-Keys, der Wert von `X-Origin-Auth` und das OME-Access-Token werden **erzeugt**, landen
 in Secret Manager und lassen sich später mit `tofu output` abrufen. Die Datei `terraform.tfvars`
 schließt `.gitignore` aus und gehört nie ins Repo.
@@ -98,7 +124,8 @@ schließt `.gitignore` aus und gehört nie ins Repo.
 ```bash
 cd infra
 tofu init
-tofu plan          # anschauen: VM, Firewall, Secrets, Bunny Pull Zone, DNS
+tofu plan          # anschauen: VM, Firewall, Secrets, Bunny Pull Zone, DNS,
+                   # Firestore mit Regeln, Eingänge, Ausgänge und Presets
 tofu apply
 ```
 
@@ -159,25 +186,52 @@ curl -sI -H "X-Origin-Auth: $(cd infra && tofu output -raw origin_auth)" "$URL" 
 # erwartet: HTTP/2 404, solange kein Stream läuft — die 403 ist weg, das genügt
 ```
 
-## Schritt 7 — Testseite ausliefern
+## Schritt 7 — Firebase einrichten
 
-Die eigene Domain zuerst in der Firebase-Konsole eintragen: *Hosting* → *Benutzerdefinierte
-Domain hinzufügen* → `streaming.johannwiebe.de`. Firebase nennt dann einen TXT-Eintrag zur
-Bestätigung und zwei A-Einträge — beide bei Cloudflare als **DNS only** anlegen.
+Was sich nicht als Code abbilden lässt, in der
+[Firebase-Konsole](https://console.firebase.google.com/project/stream-johannwiebe-de).
+
+**a) Eigene Domain.** *Hosting* → *Benutzerdefinierte Domain hinzufügen* →
+`streaming.johannwiebe.de`. Firebase nennt einen TXT-Eintrag zur Bestätigung und zwei
+A-Einträge — beide bei Cloudflare als **DNS only** anlegen.
+
+**b) Google-Anmeldung einschalten.** *Authentication* → *Sign-in method* → **Google** →
+aktivieren. Das ist die Anmeldung für die Regieansicht. Wer sie bedienen darf, steht in
+`admin_emails` (siehe Schritt 3) — ohne Eintrag dort kommt man zwar hinein, kann aber nichts
+schalten.
+
+**c) Nur falls nötig: Web-App registrieren.** Die Seiten holen ihre Firebase-Konfiguration
+unter `/__/firebase/init.json`, das Firebase Hosting selbst ausliefert — deshalb steht kein
+Schlüssel im Repo. Am 22.09.2026 lieferte das Projekt dort bereits `apiKey`, `authDomain` und
+`projectId`, **obwohl keine Web-App registriert ist**; das genügt für Firestore und die
+Anmeldung. Prüfen:
+
+```bash
+curl -s https://stream-johannwiebe-de.web.app/__/firebase/init.json
+```
+
+Fehlt dort `apiKey`, dann *Projektübersicht* → *App hinzufügen* → **Web** (`</>`), Name z. B.
+`streaming`. Der angezeigte SDK-Schnipsel wird nicht gebraucht, nur die Registrierung.
+
+## Schritt 8 — Seiten ausliefern
 
 ```bash
 cd web
 firebase deploy --only hosting
 ```
 
-Die Seite liegt danach auf `https://stream-johannwiebe-de.web.app` und, sobald die Domain
+Die Seiten liegen danach auf `https://stream-johannwiebe-de.web.app` und, sobald die Domain
 bestätigt ist, zusätzlich auf `https://streaming.johannwiebe.de`.
+
+Beim **ersten Mal** einmal `/admin/regie` öffnen und anmelden: Ist noch kein Routing gesetzt,
+legt die Regie es aus dem ersten Preset an und schreibt damit die Ausgangsseiten. Vorher zeigen
+sie „kein Signal“.
 
 > Falls die CLI klemmt, geht es auch ohne sie: Firebase Hosting hat eine REST-API
 > (`sites/…/versions` anlegen, `:populateFiles`, Datei per `sha256` des **gzip**-Inhalts
 > hochladen, `FINALIZED` setzen, `releases` anlegen). Nützlich, wenn node gerade nicht läuft.
 
-## Schritt 8 — OBS einrichten
+## Schritt 9 — OBS einrichten
 
 ```bash
 cd infra && tofu output -json obs_srt_urls | jq -r '.live1'
@@ -210,7 +264,7 @@ getrennt.
 
 ---
 
-## Abnahme
+## Abnahme Phase 1
 
 Fertig ist Phase 1, wenn alles hier zutrifft. Was sich messen lässt, misst ein Skript. Es
 läuft auf dem eigenen Rechner und sieht die Kette dabei genau so wie ein Zuschauer — über
@@ -243,12 +297,18 @@ Seite schon ab 23 s.
 | --- | --- | --- | --- | --- | --- |
 | Mac · Chrome | ✅ 20.09. | offen | offen | ✅ 20.09. | 23 s (bei 4 s Segmenten) |
 | Mac · Safari | offen | offen | offen | offen | |
-| Windows · Edge | offen | offen | offen | offen | |
-| Windows · Firefox | offen | offen | offen | offen | |
+| Windows · Edge | ✅ 22.09. | ✅ 22.09. | ✅ 22.09. | ✅ 22.09. | nicht notiert |
+| Windows · Firefox | ✅ 22.09. | ✅ 22.09. | ✅ 22.09. | ✅ 22.09. | nicht notiert |
 | Android-Handy · Chrome | offen | offen | offen | offen | |
 | Android-Tablet · Chrome | offen | offen | offen | offen | |
-| iPhone · Safari | offen | entfällt | offen | offen | |
+| iPhone · Safari | ✅ 22.09. | entfällt | ✅ 22.09. | ✅ 22.09. | nicht notiert |
 | iPad · Safari | **kein Gerät vorhanden** | – | – | – | – |
+
+Am 22.09.2026 liefen Windows (Edge und Firefox) und das iPhone durch — **das iPhone
+im Vollbild mit Zeitleiste**, also trägt die EVENT-Playlist wie vorgesehen. Die
+Verzögerung wurde dabei nicht abgelesen; der Wert aus der Umstellung auf 2-Sekunden-
+Segmente (erwartet rund 17 s) ist damit **weiterhin unbestätigt**. Offen bleiben
+Android und Mac · Safari.
 
 Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
 allein, deshalb steht dort „entfällt". Die Zeitleiste im Vollbild erscheint dort nur, weil die
@@ -297,7 +357,65 @@ zwischen den Tests heruntergefahren lassen; Phase 3 behebt es mit AdmissionWebho
 
 ---
 
+## Abnahme Phase 2
+
+Fertig, wenn ein Preset auf allen offenen Seiten in unter 5 Sekunden wirkt — auch auf einem
+iPhone im Vollbild.
+
+So wird gemessen, ohne Stoppuhr: zwei Geräte nebeneinander auf `/hauptsaal`, ein drittes auf
+`/admin/regie`. Preset tippen und zählen, bis beide Seiten das neue Bild zeigen. Firestore
+meldet die Änderung in der Regel unter einer Sekunde; der Rest ist die Ladezeit des Players.
+
+| Prüfpunkt | Stand |
+| --- | --- |
+| Preset wirkt auf allen offenen Seiten in unter 5 s | offen |
+| Einzel-Override sticht das Preset, nur für seinen Ausgang | offen |
+| Umschalten im iPhone-Vollbild | offen — siehe unten |
+| `/embed/<ausgang>` im `<iframe>` | offen |
+| Ohne Signal: Hinweis statt schwarzer Fläche, Start von selbst | offen |
+| Nur-Ton-Modus | offen |
+| AirPlay (Safari) und Chromecast (Chrome) | offen |
+| Ohne Anmeldung ist nur `public/*` lesbar | offen |
+| Fremde Anmeldung kann nicht schalten | offen |
+
+Die Auflösung selbst — Preset, Override, Standard-Eingang — hängt nicht am Gerät und wird
+deshalb hier geprüft:
+
+```bash
+node web/test/routing.test.mjs
+```
+
+### Bekannte Einschränkung: iPhone im Vollbild
+
+Im nativen Vollbild übernimmt iOS die Bedienelemente des Video-Elements. Ein Quellenwechsel
+setzt dieses Element neu — und iOS beendet dabei in der Regel das Vollbild. Die Seite merkt
+sich den Zustand und ruft nach `loadedmetadata` sofort `webkitEnterFullscreen()` auf; ob das
+ohne neue Nutzergeste durchgeht, entscheidet iOS und ändert sich zwischen Versionen.
+
+Mehr ist von der Webseite aus nicht möglich: Vollbild lässt sich auf dem iPhone nur für
+Video-Elemente auslösen ([WebKit-Bug 212934](https://bugs.webkit.org/show_bug.cgi?id=212934)),
+und eine Geste lässt sich nicht erfinden. **Beim Gerätetest festhalten, was tatsächlich
+passiert** — bleibt das Vollbild, ist der Punkt erledigt; fällt es heraus, ist ein Tipp auf den
+Vollbildknopf nötig, und das gehört in die Anleitung für die Zuschauer.
+
+---
+
 ## Betrieb
+
+### Umschalten
+
+`/admin/regie` auf dem Handy, mit Google anmelden. Oben die Presets als Knöpfe, darunter je
+Ausgang ein Auswahlfeld für den Einzelfall. Beides schreibt in einem Zug das Routing und alle
+Ausgangsseiten — es gibt keinen Zwischenzustand, in dem eine Seite schon und eine andere noch
+nicht umgeschaltet hat.
+
+Ein Preset-Knopf löscht die Einzelfälle mit. Wer nur einen Ausgang umlegt, behält das Preset,
+und der Knopf ist dann nicht mehr hervorgehoben — das ist gewollt: Es zeigt, dass jemand
+danebengegriffen hat.
+
+**Eingänge zeigen bis Phase 3 „Status erst ab Phase 3".** Ob OBS wirklich sendet, meldet erst
+der AdmissionWebhook aus Phase 3. Bis dahin sagt die Ausgangsseite es indirekt: Läuft ein Bild,
+sendet jemand.
 
 ### Nach jedem Termin: Playlist beenden
 
@@ -372,6 +490,12 @@ quality_profile = "normal"
 | Playlist ist leer | `EnableTsPackaging` fehlt, oder OBS sendet H.265 statt H.264. |
 | Verzögerung über 25 s | `hls_segment_count` auf 4 senken, SRT-Latenz in OBS auf 2 s, dann neu messen. |
 | Safari zeigt keine Zeitleiste | `hls_event_playlist` steht auf `false`. Beim gleitenden Fenster gibt es sie nicht. |
+| Seiten bleiben leer, Konsole meldet `init.json` | Es ist keine Web-App im Firebase-Projekt registriert — Schritt 7b. |
+| Regie meldet „darf nicht schalten" | Die angemeldete Adresse fehlt in `admin_emails`. Eintragen, `tofu apply`, neu laden. |
+| Ausgangsseite sagt „Unbekannter Ausgang" | Es gibt kein `public/<name>` — einmal in der Regie ein Preset tippen. |
+| Umschalten wirkt nicht | Firestore-Regeln greifen erst nach `tofu apply`; in der Browser-Konsole steht `permission-denied`. |
+| `tofu apply`: „requires a quota project" | Fehlt `user_project_override` im google-Provider, oder die Anmeldedaten haben kein Kontingentprojekt. Beides deckt `providers.tf` ab. |
+| `tofu`: „could not find default credentials" | `gcloud auth application-default login` fehlt. Für einen einzelnen Lauf reicht `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"` vor dem Befehl. |
 
 Logbücher:
 
@@ -390,4 +514,6 @@ cd infra && tofu destroy
 ```
 
 Der State-Bucket und die von Hand angelegte Firebase-Domain bleiben; beide bei Bedarf in der
-Konsole entfernen.
+Konsole entfernen. **Die Firestore-Datenbank bleibt ebenfalls stehen** (`deletion_policy =
+"ABANDON"`): Sie enthält das Routing, kostet ohne Zugriffe praktisch nichts, und ein
+versehentliches Löschen wäre nicht rückgängig zu machen.
