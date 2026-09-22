@@ -43,7 +43,7 @@ locals {
       "normal" = {
         title   = "Normal"
         order   = 0
-        mapping = { for o in var.outputs : o.name => o.default_input }
+        mapping = { for o in var.outputs : o.id => o.default_input }
       }
     },
     {
@@ -51,7 +51,7 @@ locals {
       "alle-${c.app}" => {
         title   = "Alles auf ${c.app}"
         order   = i + 1
-        mapping = { for o in var.outputs : o.name => c.app }
+        mapping = { for o in var.outputs : o.id => c.app }
       }
     }
   )

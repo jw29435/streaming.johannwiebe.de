@@ -91,30 +91,35 @@ variable "ingest_channels" {
 
 variable "outputs" {
   description = <<-EOT
-    Die festen Seiten. "name" steht in der Adresse und ist nach dem Anlegen
-    unveränderlich — Links, die einmal verteilt sind, sollen weiter stimmen.
-    "default_input" ist der Eingang im Preset "Normal".
+    Die festen Seiten. "id" ist technisch und unveränderlich: Sie ist der
+    Dauerlink /<id>, der auch dann noch stimmt, wenn der Admin die Seite
+    umbenannt hat. Titel und Adresse vergibt der Admin in der Regieansicht;
+    Terraform setzt sie beim Anlegen nur auf die ID und fasst sie danach nicht
+    mehr an. "default_input" ist der Eingang im Preset "Normal".
   EOT
   type = list(object({
-    name          = string
-    title         = string
+    id            = string
     default_input = string
   }))
   default = [
-    { name = "hauptsaal", title = "Hauptsaal", default_input = "live1" },
-    { name = "nebenraum", title = "Nebenraum", default_input = "live2" },
+    { id = "output1", default_input = "live1" },
+    { id = "output2", default_input = "live2" },
   ]
 
   validation {
-    condition     = alltrue([for o in var.outputs : can(regex("^[a-z0-9][a-z0-9-]{1,30}$", o.name))])
-    error_message = "Ausgangsnamen: Kleinbuchstaben, Ziffern und Bindestriche, 2 bis 31 Zeichen."
+    condition     = alltrue([for o in var.outputs : can(regex("^[a-z0-9][a-z0-9-]{1,30}$", o.id))])
+    error_message = "Ausgangs-IDs: Kleinbuchstaben, Ziffern und Bindestriche, 2 bis 31 Zeichen."
   }
 
   validation {
-    # Firebase Hosting leitet /<name> auf die Ausgangsseite um. Diese drei Pfade
-    # gehören der Oberfläche und der späteren API, sie dürfen kein Ausgang sein.
-    condition     = length(setintersection([for o in var.outputs : o.name], ["admin", "api", "embed"])) == 0
-    error_message = "admin, api und embed sind reserviert."
+    # Firebase Hosting leitet /<id> auf die Ausgangsseite um. Diese Pfade gehören
+    # der Oberfläche, der späteren API und den Dateien unter web/public/ —
+    # dieselbe Liste wie RESERVIERTE_SLUGS in web/public/app/routing.js.
+    condition = length(setintersection(
+      [for o in var.outputs : o.id],
+      ["admin", "api", "embed", "app", "index", "test", "ausgang", "regie", "icon", "manifest"]
+    )) == 0
+    error_message = "Diese IDs gehören der Seite selbst: admin, api, embed, app, index, test, ausgang, regie, icon, manifest."
   }
 }
 

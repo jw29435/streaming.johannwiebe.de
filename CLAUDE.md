@@ -162,6 +162,24 @@ hierher, damit sie nicht in jeder Sitzung neu verhandelt wird.
   README. Eine **Web-App muss dagegen nicht registriert werden**: Am 22.09.2026 lieferte
   `/__/firebase/init.json` bereits `apiKey`, `authDomain` und `projectId`, obwohl
   `firebase apps:list` „No apps found" meldet — das genügt für Firestore und Auth.
+- **Kennung und Name sind getrennt** (22.09.2026, auf Wunsch): Ausgänge heißen intern
+  `output1`, `output2` — unveränderlich, und zugleich der Dauerlink `/output1`. Anzeigename und
+  Adresse (`/hauptsaal`) vergibt der Admin in der Regie unter „Benennen"; beide liegen in
+  Firestore, nicht in Terraform. Die Ausgangsseite sucht deshalb **erst** nach der Kennung und
+  nur bei Fehlanzeige nach der Adresse — in dieser Reihenfolge, weil die Kennung nicht
+  umbenannt werden kann. Die Abfrage auf `slug` braucht keinen Index (Einzelfeld) und ist
+  ohne Anmeldung erlaubt, weil `public/*` ohnehin offen liegt.
+  Eingänge behalten `live1`/`live2`: Sie stehen in der OBS-Adresse und im HLS-Pfad, ein
+  Umbenennen hätte neue Stream-Keys und eine OBS-Umstellung gekostet, ohne dass sie jemand
+  sieht. Sie bekommen nur einen Titel.
+- **Terraform ist für diese Dokumente nur noch Saat.** `ignore_changes = [fields]` auf `inputs`
+  und `outputs` hält es davon ab, beim nächsten Apply den vom Admin vergebenen Namen wieder auf
+  die Kennung zurückzudrehen. Der Preis: `defaultInput`, `stream` und `hls` ändern sich danach
+  ebenfalls nicht mehr per Apply. Wer sie braucht, löscht das Dokument und lässt es neu anlegen.
+- **Eine offene Regieansicht hält ihren Ladestand.** Beim Umstellen der Ausgänge hat eine offene
+  Seite das gerade gelöschte `routing/current` sofort mit den alten Namen neu angelegt — die
+  Automatik „kein Routing? erstes Preset anwenden" griff mit veraltetem Speicher. Vor solchen
+  Eingriffen die Regie neu laden. Ab Phase 3 erledigt das die API.
 - **Anmeldung mit E-Mail und Passwort ist gewünscht** — abweichend vom Konzept, das
   „passwortlos per E-Mail-Link oder mit Google-Konto" vorsieht. Der Anbieter ist in Firebase
   Auth seit dem 22.09.2026 eingeschaltet; die Regieansicht bietet bislang nur Google an, der

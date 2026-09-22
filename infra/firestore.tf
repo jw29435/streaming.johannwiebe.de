@@ -44,6 +44,12 @@ resource "google_firebaserules_release" "firestore" {
 # wären sofort Drift. Ist noch kein Routing gesetzt, legt die Regieansicht es
 # beim ersten Öffnen aus dem ersten Preset an.
 
+# Die Titel unten sind Startwerte, keine Vorgabe: Sobald das Dokument steht,
+# gehört es der Regieansicht, und "ignore_changes" hält Terraform davon ab, ein
+# vom Admin vergebenes "Großer Saal" beim nächsten Apply wieder auf "output1"
+# zurückzudrehen. Der Preis: Auch defaultInput und stream ändern sich danach nur
+# noch über die App oder indem man das Dokument löscht und neu anlegen lässt.
+
 resource "google_firestore_document" "input" {
   for_each = local.channels
 
@@ -53,15 +59,20 @@ resource "google_firestore_document" "input" {
   document_id = each.key
 
   fields = jsonencode({
+    title  = { stringValue = each.key }
     stream = { stringValue = each.value.stream }
     hls    = { stringValue = local.playback_urls[each.key] }
     # Phase 3 setzt das per AdmissionWebhook auf "live" bzw. "offline".
     status = { stringValue = "unknown" }
   })
+
+  lifecycle {
+    ignore_changes = [fields]
+  }
 }
 
 resource "google_firestore_document" "output" {
-  for_each = { for i, o in var.outputs : o.name => merge(o, { order = i }) }
+  for_each = { for i, o in var.outputs : o.id => merge(o, { order = i }) }
 
   project     = var.project_id
   database    = google_firestore_database.default.name
@@ -69,10 +80,16 @@ resource "google_firestore_document" "output" {
   document_id = each.key
 
   fields = jsonencode({
-    title        = { stringValue = each.value.title }
+    # Titel und Adresse starten auf der ID. Der Admin ändert beide in der Regie.
+    title        = { stringValue = each.key }
+    slug         = { stringValue = each.key }
     defaultInput = { stringValue = each.value.default_input }
     order        = { integerValue = tostring(each.value.order) }
   })
+
+  lifecycle {
+    ignore_changes = [fields]
+  }
 }
 
 resource "google_firestore_document" "preset" {

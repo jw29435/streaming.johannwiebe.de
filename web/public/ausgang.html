@@ -114,7 +114,8 @@
 <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 
 <script type="module">
-import { db, doc, onSnapshot } from '/app/daten.js';
+import { db, collection, doc, onSnapshot, query, where } from '/app/daten.js';
+import { RESERVIERTE_SLUGS } from '/app/routing.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -204,49 +205,72 @@ player.on('error', () => {
 player.on('playing', versteckeHinweis);
 
 // ------------------------------------------------------ Das öffentliche Doku
-if (!name || ['admin', 'api', 'embed'].includes(name)) {
-  zeigeHinweis('Unbekannte Seite', 'Diese Adresse gehört zu keinem Ausgang.');
-} else {
-  onSnapshot(doc(db, 'public', name), (schnappschuss) => {
-    if (!schnappschuss.exists()) {
+// Eine Seite ist über zwei Wege erreichbar: /<id> ist der Dauerlink und ändert
+// sich nie, /<adresse> ist der Name, den der Admin vergeben hat. Deshalb erst
+// die ID versuchen und nur bei Fehlanzeige nach der Adresse suchen — in dieser
+// Reihenfolge, weil die ID nicht umbenannt werden kann und damit die
+// verlässliche Antwort ist.
+function hoereZu(name) {
+  let stopp = null;
+  let umgestiegen = false;
+  stopp = onSnapshot(doc(db, 'public', name), (schnappschuss) => {
+    if (schnappschuss.exists()) { verarbeite(schnappschuss.data()); return; }
+    if (umgestiegen) { return; }
+    umgestiegen = true;
+    if (stopp) { stopp(); }
+    hoereAufAdresse(name);
+  }, stoerung);
+}
+
+function hoereAufAdresse(name) {
+  onSnapshot(query(collection(db, 'public'), where('slug', '==', name)), (treffer) => {
+    if (treffer.empty) {
       document.title = 'Unbekannter Ausgang';
       zeigeHinweis('Unbekannter Ausgang', `Für „${name}“ ist nichts eingerichtet.`);
       return;
     }
+    verarbeite(treffer.docs[0].data());
+  }, stoerung);
+}
 
-    const d = schnappschuss.data();
-    const titel = d.title || name;
-    document.title = titel;
-    $('titel').textContent = titel;
+function stoerung(fehler) { zeigeHinweis('Verbindung gestört', fehler.message); }
 
-    if (d.status === 'live' || d.status === 'offline') {
-      $('status').textContent = d.status === 'live' ? 'live' : 'zurzeit offline';
-      $('status').className = 'status' + (d.status === 'live' ? ' live' : '');
-    } else {
-      $('status').textContent = '';
-    }
+if (!name || RESERVIERTE_SLUGS.includes(name)) {
+  zeigeHinweis('Unbekannte Seite', 'Diese Adresse gehört zu keinem Ausgang.');
+} else {
+  hoereZu(name);
+}
 
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: titel });
-    }
+function verarbeite(d) {
+  const titel = d.title || name;
+  document.title = titel;
+  $('titel').textContent = titel;
 
-    if (!d.hls) {
-      quellen(null);
-      zeigeHinweis('Zurzeit kein Signal', d.nextEvent
-        ? `Nächster Termin: ${d.nextEvent}`
-        : 'Sobald gesendet wird, startet die Übertragung hier von selbst.');
-      letzterStatus = d.status;
-      return;
-    }
+  if (d.status === 'live' || d.status === 'offline') {
+    $('status').textContent = d.status === 'live' ? 'live' : 'zurzeit offline';
+    $('status').className = 'status' + (d.status === 'live' ? ' live' : '');
+  } else {
+    $('status').textContent = '';
+  }
 
-    versteckeHinweis();
-    // Geht ein Eingang nach einer Pause wieder live, ist die Adresse dieselbe —
-    // der Player hält aber noch die abgelaufene Playlist. Deshalb erzwingen.
-    quellen(d.hls, letzterStatus === 'offline' && d.status === 'live');
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: titel });
+  }
+
+  if (!d.hls) {
+    quellen(null);
+    zeigeHinweis('Zurzeit kein Signal', d.nextEvent
+      ? `Nächster Termin: ${d.nextEvent}`
+      : 'Sobald gesendet wird, startet die Übertragung hier von selbst.');
     letzterStatus = d.status;
-  }, (fehler) => {
-    zeigeHinweis('Verbindung gestört', fehler.message);
-  });
+    return;
+  }
+
+  versteckeHinweis();
+  // Geht ein Eingang nach einer Pause wieder live, ist die Adresse dieselbe —
+  // der Player hält aber noch die abgelaufene Playlist. Deshalb erzwingen.
+  quellen(d.hls, letzterStatus === 'offline' && d.status === 'live');
+  letzterStatus = d.status;
 }
 
 // -------------------------------------------------------------- Bedienung

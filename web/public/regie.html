@@ -54,6 +54,19 @@
   .punkt.offline { background: var(--line); }
   .eingang code { color: var(--muted); font-size: 0.85rem; }
 
+  .feld { display: grid; gap: 4px; margin-top: 8px; }
+  .feld label { color: var(--muted); font-size: 0.8rem; }
+  .feld input {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; min-height: 48px; width: 100%;
+  }
+  .feld .vor { color: var(--muted); font-size: 0.8rem; }
+  .karte { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .karte .kennung { color: var(--muted); font-size: 0.75rem; font-family: ui-monospace, monospace; }
+  .karte button { margin-top: 10px; min-height: 44px; text-align: center; }
+
   #meldung { margin: 14px 0 0; min-height: 1.5em; font-size: 0.9rem; }
   .warn { color: var(--warn); }
   .ok { color: var(--ok); }
@@ -80,6 +93,11 @@
     <h2>Eingänge</h2>
     <div id="eingaenge"></div>
 
+    <h2>Benennen</h2>
+    <p class="sub">Namen und Adressen gehören dir. Die Kennung darunter bleibt, wie sie ist —
+       unter ihr ist eine Seite immer erreichbar, auch nach einer Umbenennung.</p>
+    <div id="benennen"></div>
+
     <p id="meldung"></p>
   </div>
 
@@ -91,12 +109,12 @@
 
 <script type="module">
 import {
-  db, app, collection, doc, onSnapshot, serverTimestamp, writeBatch, sammlung,
+  db, app, collection, doc, onSnapshot, serverTimestamp, setDoc, writeBatch, sammlung,
 } from '/app/daten.js';
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import { effektiveEingaenge, oeffentlichesDokument } from '/app/routing.js';
+import { effektiveEingaenge, oeffentlichesDokument, pruefeSlug } from '/app/routing.js';
 
 const $ = (id) => document.getElementById(id);
 const auth = getAuth(app);
@@ -171,6 +189,7 @@ function zeichne() {
   zeichnePresets();
   zeichneAusgaenge();
   zeichneEingaenge();
+  zeichneBenennen();
 
   const zeit = routing?.updatedAt?.toDate?.();
   $('stand').textContent = zeit
@@ -209,18 +228,18 @@ function zeichneAusgaenge() {
 
     const wo = document.createElement('span');
     wo.className = 'wo';
-    wo.textContent = '/' + a.id + ' → ' + (karte[a.id] || 'nichts');
+    wo.textContent = '/' + (a.slug || a.id) + ' → ' + (nameVon(karte[a.id]) || 'nichts');
 
     const wahl = document.createElement('select');
     const lautPreset = document.createElement('option');
     lautPreset.value = '';
-    lautPreset.textContent = 'laut Preset (' + (karteOhneOverride(a) || '—') + ')';
+    lautPreset.textContent = 'laut Preset (' + (nameVon(karteOhneOverride(a)) || '—') + ')';
     wahl.appendChild(lautPreset);
 
     for (const e of eingaenge) {
       const o = document.createElement('option');
       o.value = e.id;
-      o.textContent = e.id;
+      o.textContent = e.title || e.id;
       wahl.appendChild(o);
     }
     wahl.value = routing?.overrides?.[a.id] || '';
@@ -234,6 +253,11 @@ function zeichneAusgaenge() {
     zeile.append(kopf, wo, wahl);
     ziel.appendChild(zeile);
   }
+}
+
+function nameVon(eingangId) {
+  const e = eingaenge.find((x) => x.id === eingangId);
+  return e ? (e.title || e.id) : eingangId;
 }
 
 function karteOhneOverride(ausgang) {
@@ -253,7 +277,7 @@ function zeichneEingaenge() {
     punkt.className = 'punkt ' + (e.status || '');
 
     const text = document.createElement('b');
-    text.textContent = e.id;
+    text.textContent = e.title || e.id;
 
     const code = document.createElement('code');
     code.textContent = e.status === 'live' ? 'sendet'
@@ -263,6 +287,129 @@ function zeichneEingaenge() {
     zeile.append(punkt, text, code);
     ziel.appendChild(zeile);
   }
+}
+
+// --------------------------------------------------------------- Benennen
+// Die Kennung (output1, live1) bleibt unangetastet: Sie ist der Dauerlink und
+// der Schlüssel, an dem Presets, Routing und die OME-Konfiguration hängen.
+// Geändert werden nur Anzeigename und Adresse.
+
+function feld(beschriftung, wert, vorsatz) {
+  const huelle = document.createElement('div');
+  huelle.className = 'feld';
+
+  const label = document.createElement('label');
+  label.textContent = beschriftung;
+
+  const eingabe = document.createElement('input');
+  eingabe.type = 'text';
+  eingabe.value = wert || '';
+  eingabe.autocapitalize = 'off';
+  eingabe.spellcheck = false;
+
+  huelle.append(label, eingabe);
+  if (vorsatz) {
+    const v = document.createElement('span');
+    v.className = 'vor';
+    v.textContent = vorsatz;
+    huelle.appendChild(v);
+  }
+  return { huelle, eingabe };
+}
+
+function zeichneBenennen() {
+  const ziel = $('benennen');
+  ziel.innerHTML = '';
+
+  for (const a of ausgaenge) {
+    const karte = document.createElement('div');
+    karte.className = 'karte';
+
+    const kennung = document.createElement('div');
+    kennung.className = 'kennung';
+    kennung.textContent = a.id + ' · Dauerlink /' + a.id;
+
+    const name = feld('Name auf der Seite', a.title || a.id);
+    const adresse = feld('Adresse', a.slug || a.id, location.host + '/' + (a.slug || a.id));
+
+    adresse.eingabe.addEventListener('input', () => {
+      adresse.huelle.querySelector('.vor').textContent =
+        location.host + '/' + adresse.eingabe.value.trim();
+    });
+
+    const knopf = document.createElement('button');
+    knopf.textContent = 'Speichern';
+    knopf.addEventListener('click', () => benenneAusgang(
+      a.id, name.eingabe.value.trim(), adresse.eingabe.value.trim().toLowerCase(), knopf));
+
+    karte.append(kennung, name.huelle, adresse.huelle, knopf);
+    ziel.appendChild(karte);
+  }
+
+  for (const e of eingaenge) {
+    const karte = document.createElement('div');
+    karte.className = 'karte';
+
+    const kennung = document.createElement('div');
+    kennung.className = 'kennung';
+    kennung.textContent = e.id + ' · steht in der OBS-Adresse';
+
+    const name = feld('Name in der Regie', e.title || e.id);
+
+    const knopf = document.createElement('button');
+    knopf.textContent = 'Speichern';
+    knopf.addEventListener('click', () => benenneEingang(e.id, name.eingabe.value.trim(), knopf));
+
+    karte.append(kennung, name.huelle, knopf);
+    ziel.appendChild(karte);
+  }
+}
+
+async function benenneAusgang(id, titel, slug, knopf) {
+  const fehler = pruefeSlug(slug, ausgaenge, id);
+  if (fehler) { melde(fehler, 'warn'); return; }
+
+  knopf.disabled = true;
+  melde('speichert …');
+
+  // Der Ausgang und seine öffentliche Seite in einem Zug — stünde in public ein
+  // anderer Name als in outputs, fände die Adresse die Seite nicht mehr.
+  const stapel = writeBatch(db);
+  stapel.set(doc(db, 'outputs', id), { title: titel || id, slug }, { merge: true });
+  stapel.set(doc(db, 'public', id), {
+    title: titel || id, slug, updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  try {
+    await stapel.commit();
+    const a = ausgaenge.find((x) => x.id === id);
+    if (a) { a.title = titel || id; a.slug = slug; }
+    zeichne();
+    melde('gespeichert', 'ok');
+  } catch (f) {
+    melde(darfNicht(f) || ('Fehlgeschlagen: ' + f.message), 'warn');
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+async function benenneEingang(id, titel, knopf) {
+  knopf.disabled = true;
+  melde('speichert …');
+  try {
+    await setDoc(doc(db, 'inputs', id), { title: titel || id }, { merge: true });
+    melde('gespeichert', 'ok');   // der Listener auf inputs zeichnet neu
+  } catch (f) {
+    melde(darfNicht(f) || ('Fehlgeschlagen: ' + f.message), 'warn');
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+function darfNicht(fehler) {
+  return fehler.code === 'permission-denied'
+    ? 'Diese Anmeldung darf nichts ändern. In infra/variables.tf unter admin_emails eintragen.'
+    : null;
 }
 
 // --------------------------------------------------------------- Schalten
@@ -291,9 +438,7 @@ async function anwenden(neuesRouting) {
     await stapel.commit();
     melde('geschaltet', 'ok');
   } catch (fehler) {
-    melde(fehler.code === 'permission-denied'
-      ? 'Diese Anmeldung darf nicht schalten. In infra/terraform.tfvars unter admin_emails eintragen.'
-      : 'Fehlgeschlagen: ' + fehler.message, 'warn');
+    melde(darfNicht(fehler) || ('Fehlgeschlagen: ' + fehler.message), 'warn');
   }
 }
 </script>
