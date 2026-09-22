@@ -212,16 +212,18 @@ getrennt.
 
 ## Abnahme
 
-Fertig ist Phase 1, wenn alles hier zutrifft.
+Fertig ist Phase 1, wenn alles hier zutrifft. Was sich messen lässt, misst ein Skript. Es
+läuft auf dem eigenen Rechner und sieht die Kette dabei genau so wie ein Zuschauer — über
+Bunny, mit CORS und Cache. Die VM muss laufen und OBS senden:
 
 ```bash
-# Stream läuft? Playlist holen:
-curl -s https://live.streaming.johannwiebe.de/live1/kanal1/ts:master.m3u8
-# erwartet: drei EXT-X-STREAM-INF-Einträge (720p, 360p, 144p)
-
-# Segment zweimal holen, beim zweiten Mal muss der Cache greifen:
-curl -sI https://live.streaming.johannwiebe.de/live1/kanal1/ts:master.m3u8 | grep -i cdn-cache
+scripts/abnahme.sh              # live1 / kanal1
+scripts/abnahme.sh live2 kanal2
 ```
+
+Geprüft werden: Erreichbarkeit über Bunny, die drei Qualitätsstufen, der Playlist-Typ, der
+Rückstand der VM aus `EXT-X-PROGRAM-DATE-TIME`, Cache-Control für Playlists und Segmente,
+der Bunny-Cache, CORS für erlaubte und fremde Herkünfte sowie die 403 am Origin.
 
 **CPU messen** — zwei Streams gleichzeitig senden, dann auf der VM:
 
@@ -232,21 +234,29 @@ gcloud compute ssh media-vm --zone europe-west3-c --tunnel-through-iap \
 
 Ziel: dauerhaft unter 70 %.
 
-**Geräte durchgehen** und das Ergebnis hier eintragen:
+**Geräte durchgehen** und das Ergebnis hier eintragen. Die Verzögerung steht dabei auf der
+Testseite selbst, Zeile „Verzögerung ab der VM" — eine Stoppuhr ist nicht nötig. Dazu kommen
+rund 2 s für OBS und SRT; das Kriterium von 25 s gilt für die ganze Kette, deshalb warnt die
+Seite schon ab 23 s.
 
 | Gerät | Start | Qualitätswechsel | Vollbild | Zurückspulen | Verzögerung |
 | --- | --- | --- | --- | --- | --- |
 | Mac · Chrome | ✅ 20.09. | offen | offen | ✅ 20.09. | 23 s (bei 4 s Segmenten) |
-| Windows · Chrome | offen | offen | offen | offen | |
+| Mac · Safari | offen | offen | offen | offen | |
 | Windows · Edge | offen | offen | offen | offen | |
 | Windows · Firefox | offen | offen | offen | offen | |
-| Android · Chrome | offen | offen | offen | offen | |
+| Android-Handy · Chrome | offen | offen | offen | offen | |
+| Android-Tablet · Chrome | offen | offen | offen | offen | |
 | iPhone · Safari | offen | entfällt | offen | offen | |
-| iPad · Safari | offen | entfällt | offen | offen | |
-| Mac · Safari | offen | offen | offen | offen | |
+| iPad · Safari | **kein Gerät vorhanden** | – | – | – | – |
 
 Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
-allein. Deshalb steht dort „entfällt".
+allein, deshalb steht dort „entfällt". Die Zeitleiste im Vollbild erscheint dort nur, weil die
+Playlist vom Typ `EVENT` ist.
+
+**Das iPad bleibt offen**, weil keines da ist. Das iPhone prüft dieselbe WebKit-Engine, aber
+nicht das größere Vollbild-Layout von iPadOS. Wer eines auftreibt, trägt die Zeile nach; bis
+dahin ist dieser Punkt aus dem Konzept ungeprüft.
 
 ### Stand der Abnahme (20.09.2026)
 
@@ -266,21 +276,24 @@ Serverseitig geprüft und erfüllt:
 **Zur Verzögerung.** Zuerst gemessen: 23 s insgesamt, davon nur 0,9 s auf der VM. Der Rest ist
 Rückhalt im Player, der sich nach HLS-Spezifikation drei Segmentlängen vom Live-Punkt fernhält —
 bei 4 s Segmenten also 12 s. Deshalb `hls_segment_duration` auf 2 gesenkt; der Rückhalt sinkt
-damit auf 6 s, der Server liegt bei 1,5–2,1 s. Rechnerisch 8–10 s. **Im echten Player noch nicht
-nachgemessen** — erster Punkt beim nächsten Test.
+damit auf 6 s, der Server liegt bei 1,5–2,1 s. **Im echten Player noch nicht nachgemessen** —
+erster Punkt beim nächsten Test.
+
+Erwartet sind rund 17 s, nicht 8–10 s: 0,9 s VM plus 12 s Rückhalt ergeben 13 s, gemessen
+waren aber 23 s. Die Lücke von 10 s steckt in OBS, im SRT-Weg und im Puffer des Players und
+schrumpft nicht mit der Segmentlänge. Von 23 s gehen also 6 s ab, mehr nicht.
 
 So trennt man Server- von Player-Verzögerung, ohne zu raten: Die Medien-Playlist enthält je
 Segment ein `#EXT-X-PROGRAM-DATE-TIME`. Das Ende des letzten Segments gegen die Uhr gerechnet
-ergibt den Rückstand der VM; alles darüber hinaus ist Player.
+ergibt den Rückstand der VM; alles darüber hinaus ist Player. Diese Rechnung machen
+`scripts/abnahme.sh` und die Testseite inzwischen selbst — von Hand nachrechnen muss das
+niemand mehr.
 
 ### Sicherheitshinweis zu Phase 1
 
 **Der Stream-Key wird noch nicht geprüft.** Ein erfundener Key wurde angenommen und ausgeliefert —
 Push-Provider nehmen jeden Streamnamen an. Wer den App-Namen errät, kann senden. Deshalb die VM
 zwischen den Tests heruntergefahren lassen; Phase 3 behebt es mit AdmissionWebhooks.
-
-Auf iPhone und iPad gibt es kein Qualitätsmenü: Safari spielt HLS selbst ab und wählt die Stufe
-allein. Die Zeitleiste im Vollbild erscheint dort nur, weil die Playlist vom Typ `EVENT` ist.
 
 ---
 
@@ -291,6 +304,10 @@ allein. Die Zeitleiste im Vollbild erscheint dort nur, weil die Playlist vom Typ
 Solange `hls_event_playlist = true` gilt, wächst die Playlist ab Streamstart. Sie muss vor Ablauf
 von `hls_dvr_max_duration` (4 Stunden) beendet werden, sonst reagiert vor allem Safari
 unvorhersehbar.
+
+Der zweite Grund ist die Datenmenge: Bei 2-Sekunden-Segmenten kommen rund 1.800 Einträge je
+Stunde dazu, und klassisches HLS kennt keine Teilaktualisierung — jeder Player lädt alle
+2 Sekunden die ganze Playlist neu. Nach dem Beenden fängt der nächste Stream wieder klein an.
 
 ```bash
 gcloud compute ssh media-vm --zone europe-west3-c --tunnel-through-iap \

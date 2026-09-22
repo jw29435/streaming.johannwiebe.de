@@ -104,7 +104,9 @@
       <dt>Zustand</dt><dd id="mState">wartet</dd>
       <dt>Wiedergabe</dt><dd id="mTech">—</dd>
       <dt>Stufe</dt><dd id="mLevel">—</dd>
-      <dt>Rückstand zum Live-Punkt</dt><dd id="mLatency">—</dd>
+      <dt>Rückstand der VM</dt><dd id="mServer">—</dd>
+      <dt>Rückhalt im Player</dt><dd id="mHold">—</dd>
+      <dt>Verzögerung ab der VM</dt><dd id="mLatency">—</dd>
       <dt>Zurückspulbar</dt><dd id="mDvr">—</dd>
       <dt>Playlist-Typ</dt><dd id="mType">—</dd>
     </dl>
@@ -114,7 +116,12 @@
     <h2>Was hier geprüft wird</h2>
     <ul>
       <li>Start, Vollbild, Qualitätswechsel und Zurückspulen auf allen Testgeräten.</li>
-      <li>„Rückstand zum Live-Punkt“ soll unter 25 Sekunden bleiben.</li>
+      <li><b>Verzögerung:</b> „Rückstand der VM“ kommt aus
+          <code>EXT-X-PROGRAM-DATE-TIME</code> der Medien-Playlist gegen die Uhr dieses
+          Geräts; „Rückhalt im Player“ ist der Abstand zwischen Abspielposition und
+          Live-Punkt. Die Summe ist die Verzögerung ab der VM. Dazu kommen rund 2 s für
+          Kodierung in OBS und SRT-Weg — das Abnahmekriterium von 25 s gilt für die ganze
+          Kette, deshalb wird hier ab 23 s gewarnt.</li>
       <li>Auf iPhone und iPad spielt Safari HLS selbst ab und übernimmt im Vollbild die
           eigenen Bedienelemente. Die Zeitleiste erscheint dort nur, weil die Playlist
           vom Typ <code>EVENT</code> ist; ein Qualitätsmenü gibt es dort nicht, Safari
@@ -166,6 +173,9 @@
     $('mState').textContent = 'lädt …';
     $('mLevel').textContent = '—';
     $('mType').textContent = '—';
+    $('mTech').textContent = '—';
+    mediaUrl = null;
+    serverLag = null;
     try { localStorage.setItem('lastUrl', url); } catch (e) { /* egal */ }
 
     player.src({ src: url, type: 'application/x-mpegURL' });
@@ -218,6 +228,7 @@
   function buildQualityMenu() {
     var sel = $('quality');
     var q = levels();
+    var vorher = sel.value;
 
     if (!q || q.length < 2) {
       sel.innerHTML = '<option>Qualität: automatisch</option>';
@@ -240,6 +251,12 @@
       sel.appendChild(o);
     }
     sel.disabled = false;
+
+    // Der Aufbau läuft mehrfach, während die Stufen nach und nach eintreffen.
+    // Ohne das springt eine getroffene Auswahl wieder auf „Automatisch“.
+    if (vorher && sel.querySelector('option[value="' + vorher + '"]')) {
+      sel.value = vorher;
+    }
   }
 
   $('quality').addEventListener('change', function () {
@@ -251,7 +268,17 @@
     }
   });
 
+  // VHS trägt die Stufen ein, sobald es die Master-Playlist gelesen hat — das kann
+  // vor oder nach „loadedmetadata“ liegen. Hinge das Menü nur an diesem Ereignis,
+  // bliebe es je nach Zeitpunkt zufällig leer, und der Qualitätswechsel aus der
+  // Abnahme wäre auf dem Gerät gar nicht prüfbar.
   player.on('loadedmetadata', buildQualityMenu);
+
+  var qlist = levels();
+  if (qlist && typeof qlist.on === 'function') {
+    qlist.on('addqualitylevel', buildQualityMenu);
+    qlist.on('removequalitylevel', buildQualityMenu);
+  }
 
   // ----------------------------------------------------------- Zustandsanzeige
   player.on('playing', function () { $('mState').textContent = 'läuft'; });
@@ -263,26 +290,93 @@
       (e ? (e.message || ('Code ' + e.code)) : 'unbekannt') + '</span>';
   });
 
+  // Sekunden mit einer Nachkommastelle. Beim ersten Test lag der Rückstand der VM
+  // bei 0,9 s — auf ganze Sekunden gerundet wäre das nicht mehr zu erkennen.
+  function sek(x) {
+    return isFinite(x) ? (Math.round(x * 10) / 10).toFixed(1) + ' s' : '—';
+  }
+
   function fmt(sec) {
     if (!isFinite(sec) || sec < 0) { return '—'; }
     var m = Math.floor(sec / 60), s = Math.round(sec % 60);
     return m > 0 ? m + ' min ' + s + ' s' : s + ' s';
   }
 
+  // ------------------------------------------------ Verzögerung ab der VM
+  // Der Rückstand der VM steht in der Medien-Playlist: Jedes Segment trägt ein
+  // #EXT-X-PROGRAM-DATE-TIME. Der Zeitpunkt des letzten Segmentendes gegen die Uhr
+  // dieses Geräts gerechnet trennt sauber zwischen Server und Player. Beim ersten
+  // Test lag eine Schätzung nach Gefühl um mehr als das Doppelte daneben.
+  var mediaUrl = null;
+  var serverLag = null;
+
+  // Eine Stufen-Playlist darf „ts:…“ heißen, und genau das hält new URL() für ein
+  // Schema: Aus „ts:medialist_0.m3u8“ würde keine Adresse, sondern ein toter Link,
+  // und die Seite meldete danach fälschlich einen CORS-Fehler. Deshalb den Verweis
+  // von Hand an den Pfad der Master-Playlist hängen.
+  function aufloesen(rel, basis) {
+    if (/^https?:\/\//i.test(rel)) { return rel; }
+    if (rel.charAt(0) === '/') {
+      return basis.replace(/^(https?:\/\/[^/]+).*$/i, '$1') + rel;
+    }
+    return basis.replace(/[^/]*$/, '') + rel;
+  }
+
+  function readMediaPlaylist() {
+    if (!mediaUrl) { return; }
+    fetch(mediaUrl, { cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (text) {
+        var m = text.match(/#EXT-X-PLAYLIST-TYPE:\s*(\w+)/);
+        $('mType').textContent = m ? m[1] : 'gleitendes Fenster (kein Typ gesetzt)';
+
+        // Nach der letzten Zeitmarke die Segmentlängen aufsummieren. Das stimmt
+        // auch dann, wenn OME die Marke nur einmal am Anfang schreibt statt vor
+        // jedem Segment.
+        var marke = null, danach = 0;
+        text.split('\n').forEach(function (line) {
+          var p = line.match(/#EXT-X-PROGRAM-DATE-TIME:\s*(\S+)/);
+          if (p) { marke = Date.parse(p[1]); danach = 0; return; }
+          var d = line.match(/#EXTINF:\s*([\d.]+)/);
+          if (d) { danach += parseFloat(d[1]); }
+        });
+
+        serverLag = (marke && isFinite(marke))
+          ? (Date.now() - (marke + danach * 1000)) / 1000
+          : null;
+      })
+      .catch(function () {
+        $('mType').textContent = 'nicht lesbar (CORS?)';
+        serverLag = null;
+      });
+  }
+
+  setInterval(readMediaPlaylist, 5000);
+
   setInterval(function () {
-    // Rückstand zum Live-Punkt: Abstand zwischen Abspielposition und dem
-    // jüngsten Punkt, den der Player kennt. Die echte Verzögerung ist etwas
-    // größer, weil Ingest und Kodierung davorliegen — mit der Stoppuhr prüfen.
+    $('mServer').textContent = serverLag === null ? '—' : sek(serverLag);
+
     var s = player.seekable();
     if (s && s.length) {
       var end = s.end(s.length - 1);
       var start = s.start(0);
-      var behind = end - player.currentTime();
+      // Rückhalt im Player: Abstand zwischen Abspielposition und dem jüngsten
+      // Punkt, den der Player kennt. Nach HLS-Spezifikation hält er drei
+      // Segmentlängen Abstand — das ist der größte Einzelposten.
+      var holdback = end - player.currentTime();
 
-      $('mLatency').innerHTML = behind < 25
-        ? '<span class="ok">' + fmt(behind) + '</span>'
-        : '<span class="warn">' + fmt(behind) + '</span>';
+      $('mHold').textContent = sek(holdback);
       $('mDvr').textContent = fmt(end - start);
+
+      if (serverLag !== null) {
+        // Vor der VM liegen noch Kodierung in OBS und der SRT-Weg, zusammen rund
+        // 2 s. Das Kriterium von 25 s gilt für die ganze Kette, deshalb die
+        // Warnung schon ab 23 s.
+        var gesamt = serverLag + holdback;
+        $('mLatency').innerHTML = gesamt < 23
+          ? '<span class="ok">' + sek(gesamt) + '</span>'
+          : '<span class="warn">' + sek(gesamt) + '</span>';
+      }
     }
 
     if ($('mTech').textContent === '—') {
@@ -300,22 +394,22 @@
     }
   }, 1000);
 
-  // Playlist-Typ direkt aus der Datei lesen — zeigt, ob EVENT wirklich ankommt.
+  // Die Master-Playlist verweist nur; Zeitmarken und Typ stehen in der
+  // Medien-Playlist. Deren Adresse einmal je Quelle auflösen, danach liest
+  // readMediaPlaylist sie im Takt.
   player.on('loadstart', function () {
     var url = player.currentSrc();
     if (!url) { return; }
     fetch(url, { cache: 'no-store' })
       .then(function (r) { return r.text(); })
       .then(function (text) {
-        // Die Master-Playlist verweist nur; der Typ steht in der Medien-Playlist.
-        var rel = text.split('\n').find(function (l) { return l && l[0] !== '#'; });
+        var rel = text.split('\n')
+          .map(function (l) { return l.trim(); })
+          .find(function (l) { return l && l[0] !== '#'; });
         if (!rel) { return; }
-        return fetch(new URL(rel, url).href, { cache: 'no-store' }).then(function (r) { return r.text(); });
-      })
-      .then(function (media) {
-        if (!media) { return; }
-        var m = media.match(/#EXT-X-PLAYLIST-TYPE:\s*(\w+)/);
-        $('mType').textContent = m ? m[1] : 'gleitendes Fenster (kein Typ gesetzt)';
+        // Die erste Stufe genügt: Die Zeitmarken sind über alle Stufen dieselben.
+        mediaUrl = aufloesen(rel, url);
+        readMediaPlaylist();
       })
       .catch(function () { $('mType').textContent = 'nicht lesbar (CORS?)'; });
   });

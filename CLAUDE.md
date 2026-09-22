@@ -21,10 +21,18 @@ trägt: Am 20.09.2026 kam ein OBS-Stream per SRT an, lief über Bunny als HLS un
 ganze Streamdauer zurückspulbar. **Die VM ist seitdem heruntergefahren**, damit sie nichts
 kostet — vor dem nächsten Test starten.
 
-Die Abnahme ist noch nicht vollständig: Es fehlen der Gerätedurchlauf (Edge, Firefox,
-Android, iPhone, iPad), Vollbild und Qualitätswechsel, die Nachmessung der Verzögerung mit
-2-Sekunden-Segmenten und der CPU-Test mit zwei gleichzeitigen Streams. Die Tabelle in der
-README hält den Stand fest.
+Alles, was ohne fremde Geräte prüfbar ist, ist abgenommen: CPU bei zwei gleichzeitigen
+Streams 31 % im Mittel und 35 % in der Spitze, Rückstand der VM 1,5–2,1 s, RTMP als
+Rückfallebene, die drei Qualitätsstufen, die EVENT-Playlist und `conclude.sh`.
+`scripts/abnahme.sh` prüft diese Punkte in einem Durchlauf gegen die laufende Kette und
+gehört vor jeden Test.
+
+Offen ist nur noch der Gerätedurchlauf mit laufendem Stream: Start, Vollbild,
+Qualitätswechsel und Zurückspulen auf iPhone, Android, Windows (Edge, Firefox) und MacBook,
+dazu die Verzögerung im echten Player. Die Testseite rechnet sie selbst aus, eine Stoppuhr
+ist nicht nötig. **Ein iPad steht nicht zur Verfügung** — dieses Kriterium aus dem Konzept
+bleibt offen; das iPhone prüft dieselbe WebKit-Engine, aber nicht das größere Vollbild-Layout
+von iPadOS. Die Tabelle in der README hält den Stand fest.
 
 | Phase | Inhalt | Stand |
 | --- | --- | --- |
@@ -65,6 +73,7 @@ docs/konzept.md   Konzept, maßgeblich
 infra/            OpenTofu/Terraform: VM, Firewall, Dienstkonto, Secrets, Bunny
 vm/               Docker Compose, OME-Konfiguration, Caddyfile, Startskripte
 web/              Testseite mit Video.js auf Firebase Hosting
+scripts/          abnahme.sh: prüft die messbaren Abnahmepunkte vom eigenen Rechner aus
 ```
 
 ## Gepinnte Versionen
@@ -133,7 +142,11 @@ Solange das so ist:
   insgesamt, davon **0,9 s** Ingest, Kodierung und Segmentierung zusammen. Player halten sich
   nach HLS-Spezifikation drei Segmentlängen vom Live-Punkt fern, also 12 s bei 4-Sekunden-
   Segmenten. Der wirksame Hebel ist deshalb `hls_segment_duration`, nicht `hls_segment_count`.
-  Seit der Umstellung auf 2 s sind 13–17 s zu erwarten — **noch nicht nachgemessen.**
+  Die Umstellung auf 2 s nimmt 6 s Rückhalt heraus, erwartet sind also **rund 17 s** —
+  **noch nicht nachgemessen.** Vorsicht bei der Rechnung: 0,9 s VM plus 12 s Rückhalt sind
+  13 s, gemessen waren 23 s. Die fehlenden 10 s stecken in OBS, im SRT-Weg und im Puffer des
+  Players und hängen nicht an der Segmentlänge. Wer weiter drücken will, muss dort ansetzen,
+  nicht an OME.
 - **CORS muss beide Adressen kennen.** Firebase Hosting ist immer auch unter
   `stream-johannwiebe-de.web.app` erreichbar. Caddy prüft die Herkunft gegen `site_origins`
   und spiegelt die passende zurück; Bunny variiert den Cache über die Origin-Kopfzeile, sonst
@@ -145,6 +158,12 @@ Solange das so ist:
 - **Die Fehlersuche gehört auf den Server.** `EXT-X-PROGRAM-DATE-TIME` in der Medien-Playlist
   gegen die Uhr gerechnet trennt sauber zwischen Server- und Player-Verzögerung. Eine
   Schätzung nach Gefühl lag um mehr als das Doppelte daneben.
+- **Die EVENT-Playlist wächst, und jeder Player holt sie ganz.** Gerechnet, nicht gemessen:
+  Bei 2-Sekunden-Segmenten kommen rund 1.800 Einträge je Stunde dazu; nach zwei Stunden sind
+  das etwa 300 KB, die jeder Player alle 2 Sekunden neu lädt — grob ein Fünftel der
+  Videomenge obendrauf. Klassisches HLS kennt keine Teilaktualisierung. Das ist der Preis
+  fürs Zurückspulen im iPhone-Vollbild und ein weiterer Grund, `conclude.sh` nach jedem
+  Termin laufen zu lassen: Der nächste Stream fängt wieder klein an.
 - **OBS sendet 720p mit 60 fps,** nicht mit 30 wie im Konzept angenommen. Die Stufe wird
   unverändert durchgereicht, kostet also keine Rechenleistung, aber bei 3.000 kbit/s ist 60 fps
   ein Qualitätsnachteil gegenüber 30. Vor Phase 2 klären.
