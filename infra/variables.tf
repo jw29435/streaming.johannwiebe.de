@@ -86,6 +86,49 @@ variable "ingest_channels" {
 }
 
 # ---------------------------------------------------------------------------
+# Ausgänge und Regie (Phase 2)
+# ---------------------------------------------------------------------------
+
+variable "outputs" {
+  description = <<-EOT
+    Die festen Seiten. "name" steht in der Adresse und ist nach dem Anlegen
+    unveränderlich — Links, die einmal verteilt sind, sollen weiter stimmen.
+    "default_input" ist der Eingang im Preset "Normal".
+  EOT
+  type = list(object({
+    name          = string
+    title         = string
+    default_input = string
+  }))
+  default = [
+    { name = "hauptsaal", title = "Hauptsaal", default_input = "live1" },
+    { name = "nebenraum", title = "Nebenraum", default_input = "live2" },
+  ]
+
+  validation {
+    condition     = alltrue([for o in var.outputs : can(regex("^[a-z0-9][a-z0-9-]{1,30}$", o.name))])
+    error_message = "Ausgangsnamen: Kleinbuchstaben, Ziffern und Bindestriche, 2 bis 31 Zeichen."
+  }
+
+  validation {
+    # Firebase Hosting leitet /<name> auf die Ausgangsseite um. Diese drei Pfade
+    # gehören der Oberfläche und der späteren API, sie dürfen kein Ausgang sein.
+    condition     = length(setintersection([for o in var.outputs : o.name], ["admin", "api", "embed"])) == 0
+    error_message = "admin, api und embed sind reserviert."
+  }
+}
+
+variable "admin_emails" {
+  description = <<-EOT
+    Wer die Regieansicht bedienen darf. Die Firestore-Regeln prüfen die bestätigte
+    E-Mail-Adresse aus dem Google-Login. In Phase 3 ersetzen Rollen als Custom
+    Claims diese Liste.
+  EOT
+  type        = list(string)
+  default     = ["johannwiebe29@gmail.com"]
+}
+
+# ---------------------------------------------------------------------------
 # HLS und Zurückspulen
 # ---------------------------------------------------------------------------
 

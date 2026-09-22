@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// Phase 2. Geschrieben wird vorerst direkt aus der Regieansicht — deshalb steht
+// hier, wer Admin ist. Ab Phase 3 schreibt nur noch die API mit dem Admin-SDK;
+// dann werden aus den Schreibregeln unten "if false" und die Liste entfällt.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // email_verified ist kein Beiwerk: Ist der Anbieter "E-Mail und Passwort"
+    // eingeschaltet, könnte sich sonst jemand mit einer fremden Adresse aus
+    // admin_emails registrieren und wäre sofort Admin. Bei Google-Login ist die
+    // Prüfung immer erfüllt, bei einem Passwort-Konto erst nach dem Klick in der
+    // Bestätigungsmail — wer den überspringt, kommt hinein, kann aber nichts
+    // schalten.
+    function istAdmin() {
+      return request.auth != null
+          && request.auth.token.email_verified == true
+          && request.auth.token.email in [${admin_emails}];
+    }
+
+    // Was der Player einer Ausgangsseite liest: effektiver Eingang, HLS-Adresse,
+    // Status. Ohne Anmeldung, weil Zuschauer kein Konto haben.
+    match /public/{name} {
+      allow read: if true;
+      allow write: if istAdmin();
+    }
+
+    // Stream-Keys (Phase 3). Die Collection gibt es noch nicht; die Regel steht
+    // trotzdem schon, damit sie nicht versehentlich unter die Sammelregel unten
+    // fällt, sobald Phase 3 sie anlegt. Lesbar ist sie nur für das Admin-SDK,
+    // und das umgeht die Regeln ohnehin.
+    match /inputSecrets/{id} {
+      allow read, write: if false;
+    }
+
+    // Konfiguration: Eingänge, Ausgänge, Presets, Routing, Zeitplan.
+    // Kein Geheimnis, aber auch nichts, was Zuschauer brauchen.
+    match /{document=**} {
+      allow read: if request.auth != null;
+      allow write: if istAdmin();
+    }
+  }
+}

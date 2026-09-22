@@ -7,6 +7,11 @@ resource "google_project_service" "required" {
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
     "oslogin.googleapis.com",
+    "firestore.googleapis.com",
+    # Fürs Dienstkonto der VM. Stand nie in dieser Liste und war im Projekt nicht
+    # aktiviert — aufgefallen erst, als der Provider anfing, das Kontingent gegen
+    # dieses Projekt zu buchen (user_project_override in providers.tf).
+    "iam.googleapis.com",
   ])
 
   project = var.project_id

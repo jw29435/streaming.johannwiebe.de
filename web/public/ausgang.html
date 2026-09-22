@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>streaming.johannwiebe.de</title>
+<meta name="description" content="Live-Übertragung.">
+<meta name="theme-color" content="#12141a">
+<link rel="apple-touch-icon" href="/icon.svg">
+
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video-js.min.css"
+      integrity="sha512-uki7RYRF8BrCB9BB7r6BvPTb/HzpCFwSwRoTvdq0pMh0M7CbIMNPrDzZdIbqrx27JkGw2/h8va1X6QAZSKTRvg=="
+      crossorigin="anonymous" referrerpolicy="no-referrer">
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #12141a;
+    --panel: #1c1f27;
+    --line: #2e3340;
+    --text: #e8eaef;
+    --muted: #9aa1b1;
+    --accent: #4c8dff;
+    --ok: #3ecf8e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; }
+
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  .status { font-size: 0.85rem; color: var(--muted); }
+  .status.live::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+    border-radius: 50%; background: var(--ok);
+  }
+
+  .buehne { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
+  .video-js { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+
+  /* Nur Ton: das Bild verschwindet, der Ton läuft weiter. Die Bedienelemente
+     bleiben sichtbar, sonst käme man nicht mehr zurück. */
+  body.nur-ton .video-js video { visibility: hidden; }
+  body.nur-ton .buehne::after {
+    content: "🔊 Nur Ton";
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--muted); font-size: 1.1rem; pointer-events: none;
+  }
+
+  .hinweis {
+    position: absolute; inset: 0; display: none;
+    place-items: center; text-align: center; padding: 24px;
+    background: #000; color: var(--muted);
+  }
+  .hinweis.an { display: grid; }
+  .hinweis b { display: block; color: var(--text); font-size: 1.1rem; margin-bottom: 6px; }
+
+  .bar { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 0; }
+  button {
+    font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 18px; min-height: 48px;   /* groß genug fürs Handy */
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button[hidden] { display: none; }
+  footer { margin-top: 18px; color: var(--muted); font-size: 0.85rem; }
+
+  /* Eingebettet zählt nur das Bild. */
+  body.embed { padding: 0; }
+  body.embed header, body.embed footer { display: none; }
+  body.embed .buehne { border-radius: 0; }
+  body.embed .bar { padding: 8px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="titel">…</h1>
+    <span class="status" id="status"></span>
+  </header>
+
+  <div class="buehne">
+    <video id="player" class="video-js vjs-big-play-centered"
+           controls playsinline muted preload="auto"
+           x-webkit-airplay="allow"></video>
+    <div class="hinweis" id="hinweis"><div><b id="hinweisTitel"></b><span id="hinweisText"></span></div></div>
+  </div>
+
+  <div class="bar">
+    <button id="ton" class="primary">🔊 Ton an</button>
+    <button id="live">Zum Live-Punkt</button>
+    <button id="nurTon">Nur Ton</button>
+    <button id="cast" hidden>📺 Übertragen</button>
+  </div>
+
+  <footer id="fuss"></footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video.min.js"
+        integrity="sha512-sRxq4fhpy/EbkRIr8G96Fi2Do/qScfr9XlG5NbtBl3Gsgh+x/oWTw/nWgW03SuD7w2TZGVrQHpScJeNPVrAQzQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<!-- Chromecast. Ohne das SDK gibt es keinen Cast-Knopf: Chrome spielt HLS über
+     MSE ab, und die Remote-Playback-API des Browsers kann eine MSE-Quelle nicht
+     weiterreichen. Safari braucht es nicht, dort genügt AirPlay. -->
+<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+
+<script type="module">
+import { db, doc, onSnapshot } from '/app/daten.js';
+
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------ Welcher Ausgang
+// /hauptsaal → "hauptsaal", /embed/hauptsaal → "hauptsaal" ohne Drumherum.
+const teile = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
+const embed = teile[0] === 'embed';
+const name = (embed ? teile[1] : teile[0]) || '';
+
+if (embed) { document.body.classList.add('embed'); }
+else {
+  const m = document.createElement('link');
+  m.rel = 'manifest';
+  m.href = '/manifest.webmanifest';
+  document.head.appendChild(m);
+}
+
+function zeigeHinweis(titel, text) {
+  $('hinweisTitel').textContent = titel;
+  $('hinweisText').textContent = text || '';
+  $('hinweis').classList.add('an');
+}
+function versteckeHinweis() { $('hinweis').classList.remove('an'); }
+
+// ------------------------------------------------------------------- Player
+const player = videojs('player', {
+  liveui: true,                                   // Zeitleiste zum Zurückspulen
+  html5: { vhs: { enableLowInitialPlaylist: true } },
+  playsinline: true,
+  autoplay: true,
+  muted: true,                                    // sonst blockieren Browser den Start
+  controlBar: { pictureInPictureToggle: true },
+});
+const video = player.el().querySelector('video');
+
+let aktuelleAdresse = null;
+let letzterStatus = null;
+let wiederholung = null;
+
+function quellen(adresse, erzwingen) {
+  if (!adresse) {
+    aktuelleAdresse = null;
+    player.pause();
+    return;
+  }
+  if (adresse === aktuelleAdresse && !erzwingen) { return; }
+
+  // Auf dem iPhone übernimmt iOS im Vollbild die Bedienung, und ein
+  // Quellenwechsel wirft die Wiedergabe dort heraus. Ob das Zurückholen ohne
+  // neue Nutzergeste klappt, entscheidet iOS — deshalb der Versuch und kein
+  // Verlass darauf. Steht als bekannte Einschränkung in der README.
+  const warVollbild = !!(document.fullscreenElement || document.webkitFullscreenElement
+                         || video.webkitDisplayingFullscreen);
+
+  aktuelleAdresse = adresse;
+  player.src({ src: adresse, type: 'application/x-mpegURL' });
+  player.play().catch(() => { /* Autostart darf scheitern, der Knopf bleibt */ });
+
+  if (warVollbild) {
+    player.one('loadedmetadata', () => {
+      try {
+        if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); }
+        else if (!document.fullscreenElement) { player.requestFullscreen().catch(() => {}); }
+      } catch (e) { /* dann eben im Fenster */ }
+    });
+  }
+}
+
+// Bricht die Wiedergabe ab — Stream beendet, Netz weg —, wird es stillschweigend
+// weiter versucht. Ohne das bliebe die Seite nach einer Unterbrechung dunkel,
+// bis jemand neu lädt.
+player.on('error', () => {
+  if (!aktuelleAdresse || wiederholung) { return; }
+
+  // Bis Phase 3 den Live-Status meldet, ist ein Abspielfehler das einzige
+  // Zeichen dafür, dass gerade niemand sendet — die Adresse steht ja immer im
+  // Dokument. Deshalb hier derselbe Hinweis wie bei fehlendem Eingang.
+  zeigeHinweis('Zurzeit kein Signal',
+    'Sobald gesendet wird, startet die Übertragung hier von selbst.');
+
+  wiederholung = setTimeout(() => {
+    wiederholung = null;
+    quellen(aktuelleAdresse, true);
+  }, 10000);
+});
+
+player.on('playing', versteckeHinweis);
+
+// ------------------------------------------------------ Das öffentliche Doku
+if (!name || ['admin', 'api', 'embed'].includes(name)) {
+  zeigeHinweis('Unbekannte Seite', 'Diese Adresse gehört zu keinem Ausgang.');
+} else {
+  onSnapshot(doc(db, 'public', name), (schnappschuss) => {
+    if (!schnappschuss.exists()) {
+      document.title = 'Unbekannter Ausgang';
+      zeigeHinweis('Unbekannter Ausgang', `Für „${name}“ ist nichts eingerichtet.`);
+      return;
+    }
+
+    const d = schnappschuss.data();
+    const titel = d.title || name;
+    document.title = titel;
+    $('titel').textContent = titel;
+
+    if (d.status === 'live' || d.status === 'offline') {
+      $('status').textContent = d.status === 'live' ? 'live' : 'zurzeit offline';
+      $('status').className = 'status' + (d.status === 'live' ? ' live' : '');
+    } else {
+      $('status').textContent = '';
+    }
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: titel });
+    }
+
+    if (!d.hls) {
+      quellen(null);
+      zeigeHinweis('Zurzeit kein Signal', d.nextEvent
+        ? `Nächster Termin: ${d.nextEvent}`
+        : 'Sobald gesendet wird, startet die Übertragung hier von selbst.');
+      letzterStatus = d.status;
+      return;
+    }
+
+    versteckeHinweis();
+    // Geht ein Eingang nach einer Pause wieder live, ist die Adresse dieselbe —
+    // der Player hält aber noch die abgelaufene Playlist. Deshalb erzwingen.
+    quellen(d.hls, letzterStatus === 'offline' && d.status === 'live');
+    letzterStatus = d.status;
+  }, (fehler) => {
+    zeigeHinweis('Verbindung gestört', fehler.message);
+  });
+}
+
+// -------------------------------------------------------------- Bedienung
+$('ton').addEventListener('click', () => {
+  player.muted(!player.muted());
+  if (!player.muted()) { player.volume(1); }
+  player.play().catch(() => {});
+});
+player.on('volumechange', () => {
+  const an = !player.muted();
+  $('ton').textContent = an ? '🔇 Ton aus' : '🔊 Ton an';
+  $('ton').classList.toggle('primary', !an);
+});
+
+$('live').addEventListener('click', () => {
+  const s = player.seekable();
+  if (s && s.length) { player.currentTime(s.end(s.length - 1)); }
+  player.play().catch(() => {});
+});
+
+// Nur Ton: Bild ausblenden und, wo der Browser HLS selbst zusammensetzt, auf die
+// Sparstufe festnageln. Auf iPhone und iPad wählt Safari die Stufe selbst — dort
+// spart der Modus Akku und Bildschirm, aber keine Bandbreite.
+let nurTonAn = false;
+$('nurTon').addEventListener('click', () => {
+  nurTonAn = !nurTonAn;
+  document.body.classList.toggle('nur-ton', nurTonAn);
+  $('nurTon').classList.toggle('primary', nurTonAn);
+  $('nurTon').textContent = nurTonAn ? 'Bild wieder an' : 'Nur Ton';
+  setzeStufe();
+});
+
+function setzeStufe() {
+  const q = typeof player.qualityLevels === 'function' ? player.qualityLevels() : null;
+  if (!q || !q.length) { return; }
+
+  let sparsamste = 0;
+  for (let i = 1; i < q.length; i++) {
+    if ((q[i].bitrate || Infinity) < (q[sparsamste].bitrate || Infinity)) { sparsamste = i; }
+  }
+  for (let i = 0; i < q.length; i++) { q[i].enabled = !nurTonAn || i === sparsamste; }
+}
+player.on('loadedmetadata', setzeStufe);
+
+// ------------------------------------------------------------- Übertragen
+// AirPlay kann Safari selbst; für Chromecast lädt das Cast-Framework oben und
+// schickt dem Fernseher die HLS-Adresse direkt.
+// ponytail: überträgt nur die Adresse — Pausieren und Zurückspulen laufen dann
+// über die Fernbedienung, nicht über diese Seite. Reicht, bis jemand es vermisst.
+let castKontext = null;
+
+function castBereit() {
+  castKontext = cast.framework.CastContext.getInstance();
+  castKontext.setOptions({
+    receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+    autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+  });
+  $('cast').hidden = false;
+}
+
+window.__onGCastApiAvailable = (verfuegbar) => { if (verfuegbar) { castBereit(); } };
+if (video.webkitShowPlaybackTargetPicker) { $('cast').hidden = false; }
+
+$('cast').addEventListener('click', async () => {
+  if (video.webkitShowPlaybackTargetPicker) {      // Safari: AirPlay
+    video.webkitShowPlaybackTargetPicker();
+    return;
+  }
+  if (!castKontext || !aktuelleAdresse) { return; }
+
+  try {
+    await castKontext.requestSession();
+    const sitzung = castKontext.getCurrentSession();
+    const info = new chrome.cast.media.MediaInfo(aktuelleAdresse, 'application/x-mpegURL');
+    info.metadata = new chrome.cast.media.GenericMediaMetadata();
+    info.metadata.title = $('titel').textContent;
+    await sitzung.loadMedia(new chrome.cast.media.LoadRequest(info));
+    player.pause();
+  } catch (e) { /* abgebrochen oder kein Gerät gefunden */ }
+});
+
+$('fuss').textContent = 'Läuft die Übertragung nicht, hilft meist Neuladen.';
+</script>
+</body>
+</html>

@@ -3,423 +3,91 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Testseite — streaming.johannwiebe.de</title>
-<meta name="description" content="Phase-1-Testseite für den Durchstich der Media-Pipeline.">
-
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video-js.min.css"
-      integrity="sha512-uki7RYRF8BrCB9BB7r6BvPTb/HzpCFwSwRoTvdq0pMh0M7CbIMNPrDzZdIbqrx27JkGw2/h8va1X6QAZSKTRvg=="
-      crossorigin="anonymous" referrerpolicy="no-referrer">
-
+<title>streaming.johannwiebe.de</title>
+<!-- Die Seiten sind öffentlich, aber nichts, was in Suchmaschinen gehört. -->
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#12141a">
+<link rel="icon" href="/icon.svg">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #12141a;
-    --panel: #1c1f27;
-    --line: #2e3340;
-    --text: #e8eaef;
-    --muted: #9aa1b1;
-    --accent: #4c8dff;
-    --ok: #3ecf8e;
-    --warn: #ffb020;
+    --bg: #12141a; --panel: #1c1f27; --line: #2e3340;
+    --text: #e8eaef; --muted: #9aa1b1; --accent: #4c8dff; --ok: #3ecf8e;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    padding: 16px;
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; padding: 24px 16px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  main { max-width: 900px; margin: 0 auto; }
-  h1 { font-size: 1.25rem; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
-
-  .player-wrap { background: #000; border-radius: 10px; overflow: hidden; }
-  .video-js { width: 100%; height: auto; aspect-ratio: 16 / 9; }
-
-  .bar {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    margin: 12px 0;
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  a.karte {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 10px;
+    color: var(--text); text-decoration: none; min-height: 60px;
   }
-  button, select, input {
-    font: inherit;
-    color: var(--text);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 10px 14px;
-    min-height: 44px;           /* große Bedienelemente fürs Handy */
-  }
-  button { cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button:disabled { opacity: 0.45; cursor: default; }
-  input[type="url"] { flex: 1 1 320px; min-width: 0; }
-
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-top: 16px;
-  }
-  .panel h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
-  dt { color: var(--muted); }
-  dd { margin: 0; font-variant-numeric: tabular-nums; }
-  code { background: #0d0f14; padding: 2px 6px; border-radius: 4px; font-size: 0.87em; word-break: break-all; }
-  .ok { color: var(--ok); }
-  .warn { color: var(--warn); }
-  ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
-  li { margin: 4px 0; }
+  a.karte:hover { border-color: var(--accent); }
+  a.karte b { font-size: 1.05rem; }
+  a.karte .wo { color: var(--muted); font-size: 0.85rem; }
+  .punkt { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .punkt.live { background: var(--ok); }
+  footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
+  footer a { color: var(--accent); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Testseite — Phase 1</h1>
-  <p class="sub">Durchstich der Media-Pipeline: OBS → SRT → OvenMediaEngine → Caddy → Bunny CDN → HLS.</p>
+  <h1>Übertragungen</h1>
+  <p class="sub" id="sub">lädt …</p>
+  <div id="liste"></div>
 
-  <div class="player-wrap">
-    <video id="player" class="video-js vjs-big-play-centered"
-           controls playsinline muted preload="auto"
-           x-webkit-airplay="allow"></video>
-  </div>
-
-  <div class="bar">
-    <button id="unmute" class="primary">🔊 Ton an</button>
-    <select id="channel" aria-label="Kanal"></select>
-    <select id="quality" aria-label="Qualität" disabled></select>
-    <button id="golive">Zum Live-Punkt</button>
-  </div>
-
-  <div class="bar">
-    <input type="url" id="customUrl" placeholder="Andere HLS-Adresse …" spellcheck="false">
-    <button id="load">Laden</button>
-  </div>
-
-  <section class="panel">
-    <h2>Messwerte</h2>
-    <dl>
-      <dt>Adresse</dt><dd><code id="mUrl">—</code></dd>
-      <dt>Zustand</dt><dd id="mState">wartet</dd>
-      <dt>Wiedergabe</dt><dd id="mTech">—</dd>
-      <dt>Stufe</dt><dd id="mLevel">—</dd>
-      <dt>Rückstand der VM</dt><dd id="mServer">—</dd>
-      <dt>Rückhalt im Player</dt><dd id="mHold">—</dd>
-      <dt>Verzögerung ab der VM</dt><dd id="mLatency">—</dd>
-      <dt>Zurückspulbar</dt><dd id="mDvr">—</dd>
-      <dt>Playlist-Typ</dt><dd id="mType">—</dd>
-    </dl>
-  </section>
-
-  <section class="panel">
-    <h2>Was hier geprüft wird</h2>
-    <ul>
-      <li>Start, Vollbild, Qualitätswechsel und Zurückspulen auf allen Testgeräten.</li>
-      <li><b>Verzögerung:</b> „Rückstand der VM“ kommt aus
-          <code>EXT-X-PROGRAM-DATE-TIME</code> der Medien-Playlist gegen die Uhr dieses
-          Geräts; „Rückhalt im Player“ ist der Abstand zwischen Abspielposition und
-          Live-Punkt. Die Summe ist die Verzögerung ab der VM. Dazu kommen rund 2 s für
-          Kodierung in OBS und SRT-Weg — das Abnahmekriterium von 25 s gilt für die ganze
-          Kette, deshalb wird hier ab 23 s gewarnt.</li>
-      <li>Auf iPhone und iPad spielt Safari HLS selbst ab und übernimmt im Vollbild die
-          eigenen Bedienelemente. Die Zeitleiste erscheint dort nur, weil die Playlist
-          vom Typ <code>EVENT</code> ist; ein Qualitätsmenü gibt es dort nicht, Safari
-          wählt die Stufe selbst.</li>
-    </ul>
-  </section>
+  <footer>
+    <a href="/admin/regie">Regie</a> · <a href="/test">Testseite Phase 1</a>
+  </footer>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.24.1/video.min.js"
-        integrity="sha512-sRxq4fhpy/EbkRIr8G96Fi2Do/qScfr9XlG5NbtBl3Gsgh+x/oWTw/nWgW03SuD7w2TZGVrQHpScJeNPVrAQzQ=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script>
-(function () {
-  'use strict';
+<script type="module">
+import { db, collection } from '/app/daten.js';
+import { getDocs } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
-  var BASE = 'https://live.streaming.johannwiebe.de';
-  var CHANNELS = [
-    { label: 'Kanal 1 (live1)', url: BASE + '/live1/kanal1/ts:master.m3u8' },
-    { label: 'Kanal 2 (live2)', url: BASE + '/live2/kanal2/ts:master.m3u8' }
-  ];
+const liste = document.getElementById('liste');
+const sub = document.getElementById('sub');
 
-  var $ = function (id) { return document.getElementById(id); };
+try {
+  // public/* ist die einzige Sammlung ohne Anmeldung — genau dafür ist sie da.
+  const s = await getDocs(collection(db, 'public'));
+  const seiten = s.docs.map((d) => ({ id: d.id, ...d.data() }))
+                       .sort((a, b) => a.id.localeCompare(b.id));
 
-  var player = videojs('player', {
-    // Zeitleiste und Live-Knopf zum Zurückspulen.
-    liveui: true,
-    // Der erste Abschnitt kommt in der kleinsten Stufe, danach steigt der Player
-    // selbst. Das macht den Start auf schwachen Leitungen deutlich schneller.
-    html5: { vhs: { enableLowInitialPlaylist: true } },
-    playsinline: true,
-    autoplay: true,
-    muted: true,
-    fluid: false,
-    controlBar: { pictureInPictureToggle: true }
-  });
+  sub.textContent = seiten.length
+    ? 'Die Adressen bleiben gleich, egal welche Kamera gerade darauf läuft.'
+    : 'Noch nichts eingerichtet — in der Regie einmal ein Preset schalten.';
 
-  // -------------------------------------------------------------- Kanalwahl
-  CHANNELS.forEach(function (c, i) {
-    var o = document.createElement('option');
-    o.value = c.url;
-    o.textContent = c.label;
-    if (i === 0) { o.selected = true; }
-    $('channel').appendChild(o);
-  });
+  for (const seite of seiten) {
+    const a = document.createElement('a');
+    a.className = 'karte';
+    a.href = '/' + seite.id;
 
-  function load(url) {
-    if (!url) { return; }
-    $('mUrl').textContent = url;
-    $('mState').textContent = 'lädt …';
-    $('mLevel').textContent = '—';
-    $('mType').textContent = '—';
-    $('mTech').textContent = '—';
-    mediaUrl = null;
-    serverLag = null;
-    try { localStorage.setItem('lastUrl', url); } catch (e) { /* egal */ }
+    const punkt = document.createElement('span');
+    punkt.className = 'punkt' + (seite.status === 'live' ? ' live' : '');
 
-    player.src({ src: url, type: 'application/x-mpegURL' });
-    player.play().catch(function () { /* Autostart darf scheitern */ });
+    const text = document.createElement('span');
+    const name = document.createElement('b');
+    name.textContent = seite.title || seite.id;
+    const wo = document.createElement('div');
+    wo.className = 'wo';
+    wo.textContent = '/' + seite.id;
+    text.append(name, wo);
+
+    a.append(punkt, text);
+    liste.appendChild(a);
   }
-
-  $('channel').addEventListener('change', function () { load(this.value); });
-  $('load').addEventListener('click', function () { load($('customUrl').value.trim()); });
-  $('customUrl').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { load(this.value.trim()); }
-  });
-
-  // ------------------------------------------------------------------- Ton
-  $('unmute').addEventListener('click', function () {
-    player.muted(false);
-    player.volume(1);
-    player.play().catch(function () {});
-    updateSoundButton();
-  });
-
-  function updateSoundButton() {
-    var b = $('unmute');
-    if (player.muted()) {
-      b.textContent = '🔊 Ton an';
-      b.classList.add('primary');
-    } else {
-      b.textContent = '🔇 Ton aus';
-      b.classList.remove('primary');
-    }
-  }
-  player.on('volumechange', updateSoundButton);
-
-  // -------------------------------------------------------------- Live-Punkt
-  $('golive').addEventListener('click', function () {
-    var s = player.seekable();
-    if (s && s.length) { player.currentTime(s.end(s.length - 1)); }
-    player.play().catch(function () {});
-  });
-
-  // --------------------------------------------------------- Qualitätsmenü
-  // Nur wo der Browser HLS selbst zusammensetzt (Chrome, Edge, Firefox, Android).
-  // Safari auf iPhone und iPad spielt nativ ab und entscheidet selbst.
-  function levels() {
-    if (typeof player.qualityLevels === 'function') {
-      try { return player.qualityLevels(); } catch (e) { /* weiter unten */ }
-    }
-    return null;
-  }
-
-  function buildQualityMenu() {
-    var sel = $('quality');
-    var q = levels();
-    var vorher = sel.value;
-
-    if (!q || q.length < 2) {
-      sel.innerHTML = '<option>Qualität: automatisch</option>';
-      sel.disabled = true;
-      return;
-    }
-
-    sel.innerHTML = '';
-    var auto = document.createElement('option');
-    auto.value = 'auto';
-    auto.textContent = 'Automatisch';
-    sel.appendChild(auto);
-
-    for (var i = 0; i < q.length; i++) {
-      var l = q[i];
-      var o = document.createElement('option');
-      o.value = String(i);
-      o.textContent = (l.height ? l.height + 'p' : 'Stufe ' + (i + 1)) +
-                      (l.bitrate ? ' · ' + Math.round(l.bitrate / 1000) + ' kbit/s' : '');
-      sel.appendChild(o);
-    }
-    sel.disabled = false;
-
-    // Der Aufbau läuft mehrfach, während die Stufen nach und nach eintreffen.
-    // Ohne das springt eine getroffene Auswahl wieder auf „Automatisch“.
-    if (vorher && sel.querySelector('option[value="' + vorher + '"]')) {
-      sel.value = vorher;
-    }
-  }
-
-  $('quality').addEventListener('change', function () {
-    var q = levels();
-    if (!q) { return; }
-    var pick = this.value;
-    for (var i = 0; i < q.length; i++) {
-      q[i].enabled = (pick === 'auto') || (String(i) === pick);
-    }
-  });
-
-  // VHS trägt die Stufen ein, sobald es die Master-Playlist gelesen hat — das kann
-  // vor oder nach „loadedmetadata“ liegen. Hinge das Menü nur an diesem Ereignis,
-  // bliebe es je nach Zeitpunkt zufällig leer, und der Qualitätswechsel aus der
-  // Abnahme wäre auf dem Gerät gar nicht prüfbar.
-  player.on('loadedmetadata', buildQualityMenu);
-
-  var qlist = levels();
-  if (qlist && typeof qlist.on === 'function') {
-    qlist.on('addqualitylevel', buildQualityMenu);
-    qlist.on('removequalitylevel', buildQualityMenu);
-  }
-
-  // ----------------------------------------------------------- Zustandsanzeige
-  player.on('playing', function () { $('mState').textContent = 'läuft'; });
-  player.on('waiting', function () { $('mState').textContent = 'puffert …'; });
-  player.on('pause',   function () { $('mState').textContent = 'angehalten'; });
-  player.on('error', function () {
-    var e = player.error();
-    $('mState').innerHTML = '<span class="warn">Fehler: ' +
-      (e ? (e.message || ('Code ' + e.code)) : 'unbekannt') + '</span>';
-  });
-
-  // Sekunden mit einer Nachkommastelle. Beim ersten Test lag der Rückstand der VM
-  // bei 0,9 s — auf ganze Sekunden gerundet wäre das nicht mehr zu erkennen.
-  function sek(x) {
-    return isFinite(x) ? (Math.round(x * 10) / 10).toFixed(1) + ' s' : '—';
-  }
-
-  function fmt(sec) {
-    if (!isFinite(sec) || sec < 0) { return '—'; }
-    var m = Math.floor(sec / 60), s = Math.round(sec % 60);
-    return m > 0 ? m + ' min ' + s + ' s' : s + ' s';
-  }
-
-  // ------------------------------------------------ Verzögerung ab der VM
-  // Der Rückstand der VM steht in der Medien-Playlist: Jedes Segment trägt ein
-  // #EXT-X-PROGRAM-DATE-TIME. Der Zeitpunkt des letzten Segmentendes gegen die Uhr
-  // dieses Geräts gerechnet trennt sauber zwischen Server und Player. Beim ersten
-  // Test lag eine Schätzung nach Gefühl um mehr als das Doppelte daneben.
-  var mediaUrl = null;
-  var serverLag = null;
-
-  // Eine Stufen-Playlist darf „ts:…“ heißen, und genau das hält new URL() für ein
-  // Schema: Aus „ts:medialist_0.m3u8“ würde keine Adresse, sondern ein toter Link,
-  // und die Seite meldete danach fälschlich einen CORS-Fehler. Deshalb den Verweis
-  // von Hand an den Pfad der Master-Playlist hängen.
-  function aufloesen(rel, basis) {
-    if (/^https?:\/\//i.test(rel)) { return rel; }
-    if (rel.charAt(0) === '/') {
-      return basis.replace(/^(https?:\/\/[^/]+).*$/i, '$1') + rel;
-    }
-    return basis.replace(/[^/]*$/, '') + rel;
-  }
-
-  function readMediaPlaylist() {
-    if (!mediaUrl) { return; }
-    fetch(mediaUrl, { cache: 'no-store' })
-      .then(function (r) { return r.text(); })
-      .then(function (text) {
-        var m = text.match(/#EXT-X-PLAYLIST-TYPE:\s*(\w+)/);
-        $('mType').textContent = m ? m[1] : 'gleitendes Fenster (kein Typ gesetzt)';
-
-        // Nach der letzten Zeitmarke die Segmentlängen aufsummieren. Das stimmt
-        // auch dann, wenn OME die Marke nur einmal am Anfang schreibt statt vor
-        // jedem Segment.
-        var marke = null, danach = 0;
-        text.split('\n').forEach(function (line) {
-          var p = line.match(/#EXT-X-PROGRAM-DATE-TIME:\s*(\S+)/);
-          if (p) { marke = Date.parse(p[1]); danach = 0; return; }
-          var d = line.match(/#EXTINF:\s*([\d.]+)/);
-          if (d) { danach += parseFloat(d[1]); }
-        });
-
-        serverLag = (marke && isFinite(marke))
-          ? (Date.now() - (marke + danach * 1000)) / 1000
-          : null;
-      })
-      .catch(function () {
-        $('mType').textContent = 'nicht lesbar (CORS?)';
-        serverLag = null;
-      });
-  }
-
-  setInterval(readMediaPlaylist, 5000);
-
-  setInterval(function () {
-    $('mServer').textContent = serverLag === null ? '—' : sek(serverLag);
-
-    var s = player.seekable();
-    if (s && s.length) {
-      var end = s.end(s.length - 1);
-      var start = s.start(0);
-      // Rückhalt im Player: Abstand zwischen Abspielposition und dem jüngsten
-      // Punkt, den der Player kennt. Nach HLS-Spezifikation hält er drei
-      // Segmentlängen Abstand — das ist der größte Einzelposten.
-      var holdback = end - player.currentTime();
-
-      $('mHold').textContent = sek(holdback);
-      $('mDvr').textContent = fmt(end - start);
-
-      if (serverLag !== null) {
-        // Vor der VM liegen noch Kodierung in OBS und der SRT-Weg, zusammen rund
-        // 2 s. Das Kriterium von 25 s gilt für die ganze Kette, deshalb die
-        // Warnung schon ab 23 s.
-        var gesamt = serverLag + holdback;
-        $('mLatency').innerHTML = gesamt < 23
-          ? '<span class="ok">' + sek(gesamt) + '</span>'
-          : '<span class="warn">' + sek(gesamt) + '</span>';
-      }
-    }
-
-    if ($('mTech').textContent === '—') {
-      var vhs = player.tech(true) && player.tech(true).vhs;
-      $('mTech').textContent = vhs
-        ? 'Video.js baut den Stream zusammen (MSE)'
-        : 'Browser spielt HLS selbst ab (nativ)';
-    }
-
-    var q = levels();
-    if (q && q.selectedIndex >= 0 && q[q.selectedIndex]) {
-      var cur = q[q.selectedIndex];
-      $('mLevel').textContent = (cur.height ? cur.height + 'p' : '—') +
-        (cur.bitrate ? ' · ' + Math.round(cur.bitrate / 1000) + ' kbit/s' : '');
-    }
-  }, 1000);
-
-  // Die Master-Playlist verweist nur; Zeitmarken und Typ stehen in der
-  // Medien-Playlist. Deren Adresse einmal je Quelle auflösen, danach liest
-  // readMediaPlaylist sie im Takt.
-  player.on('loadstart', function () {
-    var url = player.currentSrc();
-    if (!url) { return; }
-    fetch(url, { cache: 'no-store' })
-      .then(function (r) { return r.text(); })
-      .then(function (text) {
-        var rel = text.split('\n')
-          .map(function (l) { return l.trim(); })
-          .find(function (l) { return l && l[0] !== '#'; });
-        if (!rel) { return; }
-        // Die erste Stufe genügt: Die Zeitmarken sind über alle Stufen dieselben.
-        mediaUrl = aufloesen(rel, url);
-        readMediaPlaylist();
-      })
-      .catch(function () { $('mType').textContent = 'nicht lesbar (CORS?)'; });
-  });
-
-  // ------------------------------------------------------------------ Start
-  var saved = null;
-  try { saved = localStorage.getItem('lastUrl'); } catch (e) { /* egal */ }
-  load(saved || CHANNELS[0].url);
-  updateSoundButton();
-}());
+} catch (fehler) {
+  sub.textContent = 'Übersicht nicht abrufbar: ' + fehler.message;
+}
 </script>
 </body>
 </html>

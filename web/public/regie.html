@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Regie</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#12141a">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #12141a;
+    --panel: #1c1f27;
+    --line: #2e3340;
+    --text: #e8eaef;
+    --muted: #9aa1b1;
+    --accent: #4c8dff;
+    --ok: #3ecf8e;
+    --warn: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  h2 { font-size: 0.9rem; color: var(--muted); margin: 24px 0 10px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; }
+
+  button, select {
+    font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; min-height: 52px;   /* Daumengröße, die Regie tippt am Handy */
+    width: 100%; cursor: pointer; text-align: left;
+  }
+  button.aktiv { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled, select:disabled { opacity: 0.5; cursor: default; }
+
+  .presets { display: grid; gap: 10px; }
+  .zeile {
+    display: grid; grid-template-columns: 1fr; gap: 6px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; margin-bottom: 10px;
+  }
+  .zeile b { font-weight: 600; }
+  .zeile .wo { color: var(--muted); font-size: 0.85rem; }
+  .zeile select { background: var(--bg); }
+
+  .eingang { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .punkt { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .punkt.live { background: var(--ok); }
+  .punkt.offline { background: var(--line); }
+  .eingang code { color: var(--muted); font-size: 0.85rem; }
+
+  #meldung { margin: 14px 0 0; min-height: 1.5em; font-size: 0.9rem; }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  footer { margin-top: 28px; color: var(--muted); font-size: 0.8rem; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Regie</h1>
+  <p class="sub" id="wer">nicht angemeldet</p>
+
+  <div id="anmeldung">
+    <button id="login" class="aktiv" style="text-align:center">Mit Google anmelden</button>
+  </div>
+
+  <div id="pult" hidden>
+    <h2>Preset</h2>
+    <div class="presets" id="presets"></div>
+
+    <h2>Einzeln schalten</h2>
+    <div id="ausgaenge"></div>
+
+    <h2>Eingänge</h2>
+    <div id="eingaenge"></div>
+
+    <p id="meldung"></p>
+  </div>
+
+  <footer>
+    <span id="stand"></span>
+    <br><button id="logout" hidden style="width:auto;min-height:0;padding:6px 10px;margin-top:10px">Abmelden</button>
+  </footer>
+</main>
+
+<script type="module">
+import {
+  db, app, collection, doc, onSnapshot, serverTimestamp, writeBatch, sammlung,
+} from '/app/daten.js';
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
+} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import { effektiveEingaenge, oeffentlichesDokument } from '/app/routing.js';
+
+const $ = (id) => document.getElementById(id);
+const auth = getAuth(app);
+
+let eingaenge = [];
+let ausgaenge = [];
+let presets = [];
+let routing = null;
+let nutzer = null;
+let laeuft = false;   // Listener nur einmal hängen, sonst schaltet jeder Tipp doppelt
+
+function melde(text, art) {
+  $('meldung').textContent = text || '';
+  $('meldung').className = art || '';
+}
+
+// ------------------------------------------------------------- Anmeldung
+$('login').addEventListener('click', async () => {
+  const anbieter = new GoogleAuthProvider();
+  try {
+    await signInWithPopup(auth, anbieter);
+  } catch (fehler) {
+    // Auf dem Handy blockiert der Browser Popups häufiger als am Rechner.
+    if (String(fehler.code).includes('popup')) { await signInWithRedirect(auth, anbieter); }
+    else { melde(fehler.message, 'warn'); }
+  }
+});
+$('logout').addEventListener('click', () => signOut(auth));
+
+onAuthStateChanged(auth, async (u) => {
+  nutzer = u;
+  $('wer').textContent = u ? u.email : 'nicht angemeldet';
+  $('anmeldung').hidden = !!u;
+  $('pult').hidden = !u;
+  $('logout').hidden = !u;
+  if (u && !laeuft) { laeuft = true; await laden(); }
+});
+
+// ----------------------------------------------------------------- Laden
+async function laden() {
+  try {
+    [eingaenge, ausgaenge, presets] = await Promise.all([
+      sammlung('inputs'), sammlung('outputs'), sammlung('presets'),
+    ]);
+  } catch (fehler) {
+    melde('Konfiguration nicht lesbar: ' + fehler.message, 'warn');
+    return;
+  }
+
+  // Der Live-Status kommt ab Phase 3 aus den OME-Webhooks. Bis dahin steht in
+  // jedem Eingang "unknown" — der Listener hängt trotzdem schon, damit später
+  // nichts nachgezogen werden muss.
+  onSnapshot(collection(db, 'inputs'), (s) => {
+    eingaenge = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.id.localeCompare(b.id));
+    zeichneEingaenge();
+  });
+
+  onSnapshot(doc(db, 'routing', 'current'), async (s) => {
+    if (!s.exists()) {
+      // Erster Start: ohne Routing zeigen die Ausgangsseiten nichts. Das erste
+      // Preset ist der naheliegende Anfangszustand.
+      if (presets.length) { await anwenden({ preset: presets[0].id, overrides: {} }); }
+      return;
+    }
+    routing = s.data();
+    zeichne();
+  });
+}
+
+// ---------------------------------------------------------------- Zeichnen
+function zeichne() {
+  zeichnePresets();
+  zeichneAusgaenge();
+  zeichneEingaenge();
+
+  const zeit = routing?.updatedAt?.toDate?.();
+  $('stand').textContent = zeit
+    ? `Zuletzt geschaltet ${zeit.toLocaleString('de-DE')} von ${routing.updatedBy || 'unbekannt'}.`
+    : '';
+}
+
+function zeichnePresets() {
+  const ziel = $('presets');
+  ziel.innerHTML = '';
+  for (const p of presets) {
+    const b = document.createElement('button');
+    b.textContent = p.title || p.id;
+    // Ein Preset gilt nur dann als aktiv, wenn auch kein Ausgang daneben steht.
+    b.classList.toggle('aktiv', routing?.preset === p.id && !anzahlOverrides());
+    b.addEventListener('click', () => anwenden({ preset: p.id, overrides: {} }));
+    ziel.appendChild(b);
+  }
+}
+
+function anzahlOverrides() {
+  return Object.keys(routing?.overrides || {}).length;
+}
+
+function zeichneAusgaenge() {
+  const karte = effektiveEingaenge(ausgaenge, presets, routing);
+  const ziel = $('ausgaenge');
+  ziel.innerHTML = '';
+
+  for (const a of ausgaenge) {
+    const zeile = document.createElement('div');
+    zeile.className = 'zeile';
+
+    const kopf = document.createElement('b');
+    kopf.textContent = a.title || a.id;
+
+    const wo = document.createElement('span');
+    wo.className = 'wo';
+    wo.textContent = '/' + a.id + ' → ' + (karte[a.id] || 'nichts');
+
+    const wahl = document.createElement('select');
+    const lautPreset = document.createElement('option');
+    lautPreset.value = '';
+    lautPreset.textContent = 'laut Preset (' + (karteOhneOverride(a) || '—') + ')';
+    wahl.appendChild(lautPreset);
+
+    for (const e of eingaenge) {
+      const o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = e.id;
+      wahl.appendChild(o);
+    }
+    wahl.value = routing?.overrides?.[a.id] || '';
+
+    wahl.addEventListener('change', () => {
+      const overrides = { ...(routing?.overrides || {}) };
+      if (wahl.value) { overrides[a.id] = wahl.value; } else { delete overrides[a.id]; }
+      anwenden({ preset: routing?.preset || null, overrides });
+    });
+
+    zeile.append(kopf, wo, wahl);
+    ziel.appendChild(zeile);
+  }
+}
+
+function karteOhneOverride(ausgang) {
+  return effektiveEingaenge([ausgang], presets, { preset: routing?.preset })[ausgang.id];
+}
+
+function zeichneEingaenge() {
+  const ziel = $('eingaenge');
+  if (!ziel) { return; }
+  ziel.innerHTML = '';
+
+  for (const e of eingaenge) {
+    const zeile = document.createElement('div');
+    zeile.className = 'eingang';
+
+    const punkt = document.createElement('span');
+    punkt.className = 'punkt ' + (e.status || '');
+
+    const text = document.createElement('b');
+    text.textContent = e.id;
+
+    const code = document.createElement('code');
+    code.textContent = e.status === 'live' ? 'sendet'
+                     : e.status === 'offline' ? 'kein Signal'
+                     : 'Status erst ab Phase 3';
+
+    zeile.append(punkt, text, code);
+    ziel.appendChild(zeile);
+  }
+}
+
+// --------------------------------------------------------------- Schalten
+// Ein Schreibvorgang: das Routing und alle betroffenen Ausgangsseiten. Bricht
+// etwas ab, bleibt keine Seite auf einem halben Stand stehen.
+async function anwenden(neuesRouting) {
+  melde('schaltet …');
+  const karte = effektiveEingaenge(ausgaenge, presets, neuesRouting);
+  const stapel = writeBatch(db);
+
+  stapel.set(doc(db, 'routing', 'current'), {
+    preset: neuesRouting.preset || null,
+    overrides: neuesRouting.overrides || {},
+    updatedAt: serverTimestamp(),
+    updatedBy: nutzer?.email || null,
+  });
+
+  for (const a of ausgaenge) {
+    stapel.set(doc(db, 'public', a.id), {
+      ...oeffentlichesDokument(a, karte[a.id], eingaenge),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  try {
+    await stapel.commit();
+    melde('geschaltet', 'ok');
+  } catch (fehler) {
+    melde(fehler.code === 'permission-denied'
+      ? 'Diese Anmeldung darf nicht schalten. In infra/terraform.tfvars unter admin_emails eintragen.'
+      : 'Fehlgeschlagen: ' + fehler.message, 'warn');
+  }
+}
+</script>
+</body>
+</html>
