@@ -69,7 +69,8 @@ try {
   for (const seite of seiten) {
     const a = document.createElement('a');
     a.className = 'karte';
-    a.href = '/' + seite.id;
+    // Die vom Admin vergebene Adresse, sonst die Kennung — die gilt immer.
+    a.href = '/' + (seite.slug || seite.id);
 
     const punkt = document.createElement('span');
     punkt.className = 'punkt' + (seite.status === 'live' ? ' live' : '');
@@ -79,7 +80,7 @@ try {
     name.textContent = seite.title || seite.id;
     const wo = document.createElement('div');
     wo.className = 'wo';
-    wo.textContent = '/' + seite.id;
+    wo.textContent = '/' + (seite.slug || seite.id);
     text.append(name, wo);
 
     a.append(punkt, text);

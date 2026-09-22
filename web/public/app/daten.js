@@ -10,12 +10,16 @@ import {
   getDocs,
   getFirestore,
   onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
+  where,
   writeBatch,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
-export { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, writeBatch };
+export {
+  collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch,
+};
 
 async function konfiguration() {
   // Firebase Hosting liefert die Konfiguration des verknüpften Projekts unter

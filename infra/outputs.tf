@@ -34,10 +34,14 @@ output "playback_urls" {
 }
 
 output "seiten" {
-  description = "Die festen Ausgangsseiten und die Regieansicht."
+  description = <<-EOT
+    Die Dauerlinks der Ausgangsseiten und die Regieansicht. Unter diesen Adressen
+    ist eine Seite immer erreichbar, auch wenn der Admin ihr in der Regie eine
+    schönere gegeben hat — die steht dort, nicht hier.
+  EOT
   value = merge(
-    { for o in var.outputs : o.title => "https://${var.base_domain}/${o.name}" },
-    { "Regie" = "https://${var.base_domain}/admin/regie" }
+    { for o in var.outputs : o.id => "https://${var.base_domain}/${o.id}" },
+    { "regie" = "https://${var.base_domain}/admin/regie" }
   )
 }
 

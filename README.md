@@ -25,8 +25,9 @@ Die Seiten darunter:
 
 | Adresse | Wofür |
 | --- | --- |
-| `/<ausgang>` | feste Zuschauerseite, z. B. `/hauptsaal`. Die Adresse ändert sich nie. |
-| `/embed/<ausgang>` | dieselbe Seite ohne Drumherum, für `<iframe>` |
+| `/<kennung>` | Dauerlink einer Zuschauerseite, z. B. `/output1`. Gilt immer. |
+| `/<adresse>` | dieselbe Seite unter dem Namen, den der Admin vergeben hat, z. B. `/hauptsaal` |
+| `/embed/<kennung oder adresse>` | dieselbe Seite ohne Drumherum, für `<iframe>` |
 | `/admin/regie` | Regieansicht: Preset tippen, einzeln schalten |
 | `/` | Übersicht aller Ausgänge |
 | `/test` | Testseite aus Phase 1 mit den Messwerten |
@@ -101,19 +102,26 @@ cloudflare_api_token = "…"
 bunny_api_key        = "…"
 ```
 
-Für Phase 2 kommen zwei optionale Werte dazu. Ohne sie gelten die Standardwerte aus
-`variables.tf` — zwei Ausgänge `hauptsaal` und `nebenraum` und eine Admin-Adresse:
+Mehr gehört nicht hinein. **Wie viele Ausgänge es gibt, steht in `infra/variables.tf`**, nicht
+hier: `terraform.tfvars` schließt `.gitignore` aus, Werte darin gälten nur auf diesem einen
+Rechner.
 
 ```hcl
-outputs = [
-  { name = "hauptsaal", title = "Hauptsaal", default_input = "live1" },
-  { name = "nebenraum", title = "Nebenraum", default_input = "live2" },
-]
-admin_emails = ["johannwiebe29@gmail.com"]
+variable "outputs" {
+  default = [
+    { id = "output1", default_input = "live1" },
+    { id = "output2", default_input = "live2" },
+  ]
+}
 ```
 
-**Der Name eines Ausgangs steht in seiner Adresse und wird später nicht mehr geändert** —
-verteilte Links sollen weiter stimmen. `admin`, `api` und `embed` sind reserviert.
+Mehr steht dort nicht, und das ist Absicht: **Namen und Adressen vergibt der Admin in der
+Regieansicht**, nicht Terraform. Die `id` ist technisch und unveränderlich — sie ist der
+Dauerlink `/output1`, der auch dann noch stimmt, wenn die Seite längst „Großer Saal" heißt und
+unter `/hauptsaal` läuft. Siehe [Umbenennen](#umbenennen).
+
+Dasselbe Bild bei `ingest_channels`: `live1` und `live2` sind die technischen Kennungen, die in
+der OBS-Adresse stehen. Wie sie in der Regie heißen, entscheidet der Admin.
 
 Die Stream-Keys, der Wert von `X-Origin-Auth` und das OME-Access-Token werden **erzeugt**, landen
 in Secret Manager und lassen sich später mit `tofu output` abrufen. Die Datei `terraform.tfvars`
@@ -416,6 +424,47 @@ danebengegriffen hat.
 **Eingänge zeigen bis Phase 3 „Status erst ab Phase 3".** Ob OBS wirklich sendet, meldet erst
 der AdmissionWebhook aus Phase 3. Bis dahin sagt die Ausgangsseite es indirekt: Läuft ein Bild,
 sendet jemand.
+
+### Umbenennen
+
+**In `/admin/regie`, Abschnitt „Benennen".** Kein Terraform, kein Deploy.
+
+| | Änderbar | Fest |
+| --- | --- | --- |
+| Ausgang | Name auf der Seite, Adresse (`/hauptsaal`) | Kennung `output1` — Dauerlink, Schlüssel für Presets und Routing |
+| Eingang | Name in der Regie | Kennung `live1` — steht in der OBS-Adresse und im HLS-Pfad |
+
+Eine Seite bleibt immer unter **beiden** Adressen erreichbar: unter ihrer Kennung `/output1`
+und unter der vergebenen `/hauptsaal`. Wer die Adresse ändert, macht verteilte Links auf die
+alte ungültig — die auf `/output1` nicht. Wer Links weitergibt, die dauerhaft stimmen sollen,
+gibt deshalb die Kennung weiter.
+
+Die Adresse muss frei sein: 2 bis 31 Zeichen aus Kleinbuchstaben, Ziffern und Bindestrichen,
+nicht die Kennung oder Adresse eines anderen Ausgangs, und keines der Wörter, die der Seite
+selbst gehören (`admin`, `api`, `embed`, `app`, `index`, `test`, `ausgang`, `regie`, `icon`,
+`manifest`). Die Regie prüft das vor dem Speichern und sagt, woran es liegt.
+
+> **Eine offene Regie kennt nur den Stand, mit dem sie geladen wurde.** Wer die Ausgänge in
+> Terraform ändert, während irgendwo eine Regieansicht offen steht, sollte sie danach neu laden
+> — sonst schreibt sie beim nächsten Tippen den alten Stand zurück.
+
+### Einen Ausgang hinzufügen oder entfernen
+
+Das geht weiterhin nur über Terraform, weil die Kennung zum Bestand gehört:
+
+```bash
+# infra/variables.tf: einen Eintrag zu outputs hinzufuegen, dann
+cd infra && tofu apply
+```
+
+Terraform legt das Dokument mit Startwerten an und **fasst es danach nie wieder an**
+(`ignore_changes`), damit ein Apply nicht das überschreibt, was der Admin benannt hat. Die
+Kehrseite: Auch `default_input` ändert sich danach nur noch in der App oder indem man das
+Dokument löscht und neu anlegen lässt.
+
+Beim Entfernen bleibt die zugehörige Seite unter `public/<id>` liegen — Terraform verwaltet sie
+nicht. Sie muss in der Firebase-Konsole unter *Firestore* → `public` gelöscht werden, sonst
+bleibt die alte Adresse bespielt.
 
 ### Nach jedem Termin: Playlist beenden
 
