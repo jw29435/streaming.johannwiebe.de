@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+#
+# Holt die Konfiguration aus dem Konfig-Bucket, liest die Geheimnisse aus Secret
+# Manager, trägt bei wechselnder IP die eigene Adresse bei Cloudflare ein und
+# startet die Container. Läuft beim Booten über media.service und lässt sich nach
+# einem "tofu apply" von Hand aufrufen:
+#
+#     sudo /opt/media/refresh.sh
+#
+# Absichtlich ohne gcloud: Die Debian-Abbilder bringen es nicht sicher mit, und
+# Metadaten-Token plus curl reichen vollkommen.
+
+set -euo pipefail
+exec > >(tee -a /var/log/media-refresh.log) 2>&1
+echo "=== refresh $(date -Is) ==="
+
+PROJECT_ID="${project_id}"
+CONFIG_BUCKET="${config_bucket}"
+IP_TYPE="${ip_type}"
+CF_ZONE_ID="${cloudflare_zone_id}"
+ORIGIN_HOST="${origin_host}"
+INGEST_HOST="${ingest_host}"
+SITE_ORIGIN_REGEX='${site_origin_regex}'
+CHANNEL_APPS="%{ for ch in channels ~}${ch.app} %{ endfor ~}"
+
+INSTALL_DIR=/opt/media
+DVR_DIR=/var/lib/media/dvr
+CF_API="https://api.cloudflare.com/client/v4"
+
+meta() {
+	curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/$1"
+}
+
+gtoken() {
+	meta "instance/service-accounts/default/token" | jq -r .access_token
+}
+
+# $1 Objektpfad im Bucket, $2 Zieldatei
+#
+# Erst daneben ablegen, dann per mv an den Platz schieben. Das ist wichtig, weil
+# dieses Skript sich selbst mit herunterlädt: Würde die laufende Datei überschrieben,
+# läse die Bash ab ihrer aktuellen Position Unsinn. Ein mv legt dagegen einen neuen
+# Verzeichniseintrag an, und der laufende Prozess behält die alte Datei.
+fetch_object() {
+	local encoded
+	encoded=$(printf '%s' "$1" | sed 's:/:%2F:g')
+	install -d -m 0755 "$(dirname "$2")"
+	curl -sf -H "Authorization: Bearer $(gtoken)" \
+		"https://storage.googleapis.com/storage/v1/b/$CONFIG_BUCKET/o/$encoded?alt=media" \
+		-o "$2.neu"
+	mv -f "$2.neu" "$2"
+}
+
+# $1 Name des Secrets
+read_secret() {
+	curl -sf -H "Authorization: Bearer $(gtoken)" \
+		"https://secretmanager.googleapis.com/v1/projects/$PROJECT_ID/secrets/$1/versions/latest:access" \
+		| jq -r '.payload.data' | base64 -d
+}
+
+echo "--- Konfiguration holen"
+for object in \
+	docker-compose.yml \
+	ome/Server.xml \
+	ome/Logger.xml \
+	caddy/Caddyfile \
+	scripts/refresh.sh \
+	scripts/conclude.sh \
+	scripts/cpu-watch.sh
+do
+	fetch_object "$object" "$INSTALL_DIR/$object"
+done
+chmod 0755 "$INSTALL_DIR"/scripts/*.sh
+
+# Die frisch geholte Fassung an den Platz legen, den media.service aufruft —
+# wieder über mv, aus demselben Grund wie oben.
+cp -f "$INSTALL_DIR/scripts/refresh.sh" "$INSTALL_DIR/refresh.sh.neu"
+chmod 0755 "$INSTALL_DIR/refresh.sh.neu"
+mv -f "$INSTALL_DIR/refresh.sh.neu" "$INSTALL_DIR/refresh.sh"
+
+# Hat sich dieses Skript selbst geändert, läuft hier noch die alte Fassung: Die Bash
+# hat sie bereits eingelesen. Ohne den folgenden Neustart bräuchte jede Änderung an
+# refresh.sh zwei Durchläufe, um zu wirken — eine Falle, in die man genau einmal tappt.
+if [ -z "$${MEDIA_REFRESH_REEXEC:-}" ] \
+	&& ! cmp -s "$0" "$INSTALL_DIR/refresh.sh"
+then
+	echo "--- refresh.sh hat sich geändert, mit der neuen Fassung weitermachen"
+	export MEDIA_REFRESH_REEXEC=1
+	exec "$INSTALL_DIR/refresh.sh"
+fi
+
+echo "--- Ablage für das Zurückspulen vorbereiten"
+for app in $CHANNEL_APPS; do
+	install -d -m 0755 "$DVR_DIR/$app"
+done
+
+echo "--- Geheimnisse holen"
+umask 077
+cat > "$INSTALL_DIR/.env" <<ENV
+ORIGIN_HOST=$ORIGIN_HOST
+SITE_ORIGIN_REGEX=$SITE_ORIGIN_REGEX
+ORIGIN_AUTH=$(read_secret origin-auth)
+ENV
+chmod 0600 "$INSTALL_DIR/.env"
+umask 022
+
+if [ "$IP_TYPE" = "ephemeral" ]; then
+	echo "--- Eigene IP bei Cloudflare eintragen"
+	IP=$(meta "instance/network-interfaces/0/access-configs/0/external-ip")
+	CF_TOKEN=$(read_secret cloudflare-dns-token)
+	echo "IP dieser Maschine: $IP"
+
+	for host in "$ORIGIN_HOST" "$INGEST_HOST"; do
+		record_id=$(curl -sf -H "Authorization: Bearer $CF_TOKEN" \
+			"$CF_API/zones/$CF_ZONE_ID/dns_records?type=A&name=$host" \
+			| jq -r '.result[0].id // empty')
+
+		# proxied bleibt false: Über den Cloudflare-Proxy käme weder SRT noch das
+		# Zertifikat von Let's Encrypt durch. TTL 60, damit ein Wechsel schnell greift.
+		body=$(jq -n --arg n "$host" --arg c "$IP" \
+			'{type:"A",name:$n,content:$c,ttl:60,proxied:false,comment:"Media-VM, beim Booten gesetzt"}')
+
+		if [ -n "$record_id" ]; then
+			curl -sf -X PUT \
+				-H "Authorization: Bearer $CF_TOKEN" \
+				-H "Content-Type: application/json" \
+				"$CF_API/zones/$CF_ZONE_ID/dns_records/$record_id" \
+				-d "$body" > /dev/null
+			echo "$host aktualisiert"
+		else
+			curl -sf -X POST \
+				-H "Authorization: Bearer $CF_TOKEN" \
+				-H "Content-Type: application/json" \
+				"$CF_API/zones/$CF_ZONE_ID/dns_records" \
+				-d "$body" > /dev/null
+			echo "$host angelegt"
+		fi
+	done
+else
+	echo "--- Feste IP: Die DNS-Einträge setzt OpenTofu, hier ist nichts zu tun."
+fi
+
+echo "--- Container starten"
+cd "$INSTALL_DIR"
+docker compose pull
+docker compose up -d --remove-orphans
+docker image prune -f > /dev/null
+
+# Beide Container neu aufbauen, nicht nur neu starten. "compose up" merkt eine
+# geänderte eingebundene Datei nicht — weder das Caddyfile noch die Server.xml.
+# Ein "caddy reload" wiederum liest zwar das Caddyfile neu, übernimmt aber keine
+# geänderten Umgebungsvariablen aus der .env; die stehen im Container fest.
+# Nur ein neuer Container bekommt beides.
+#
+# OME neu aufzubauen trennt einen laufenden Stream. Das ist hier richtig so: Dieses
+# Skript läuft beim Booten oder wenn jemand die Konfiguration geändert hat, und dann
+# soll sie auch wirken. OBS verbindet sich von selbst wieder.
+echo "--- Container neu aufbauen (holt Server.xml, Caddyfile und .env)"
+docker compose up -d --force-recreate
+
+docker compose ps
+echo "=== refresh fertig $(date -Is) ==="

@@ -1,0 +1,26 @@
+# OpenTofu / Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Geheimnisse: niemals ins Repo
+*.tfvars
+!*.tfvars.example
+.env
+*.pem
+*.key
+!**/ome/*.key
+
+# Firebase
+.firebase/
+firebase-debug.log
+node_modules/
+
+# macOS
+.DS_Store
+
+# Zugangsdaten für OBS, enthält die Stream-Keys
+obs-zugang.txt

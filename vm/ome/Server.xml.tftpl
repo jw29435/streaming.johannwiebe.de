@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Erzeugt von OpenTofu aus vm/ome/Server.xml.tftpl.
+	Nicht auf der VM bearbeiten — der nächste Start überschreibt die Datei.
+-->
+<Server version="8">
+	<Name>streaming.johannwiebe.de</Name>
+	<Type>origin</Type>
+	<IP>*</IP>
+	<PrivacyProtection>false</PrivacyProtection>
+
+	<Modules>
+		<HTTP2>
+			<Enable>true</Enable>
+		</HTTP2>
+		<!-- Phase 1 liefert klassisches HLS mit TS-Segmenten aus. LL-HLS bliebe
+		     zwar schneller, fällt aber bei älteren Geräten aus. -->
+		<LLHLS>
+			<Enable>false</Enable>
+		</LLHLS>
+		<P2P>
+			<Enable>false</Enable>
+		</P2P>
+	</Modules>
+
+	<Bind>
+		<Managers>
+			<!-- Manager-API für conclude.sh. Port 8081 hat bewusst keine
+			     Firewall-Regel und ist deshalb nur über 127.0.0.1 erreichbar. -->
+			<API>
+				<Port>8081</Port>
+				<WorkerCount>1</WorkerCount>
+			</API>
+		</Managers>
+
+		<Providers>
+			<RTMP>
+				<Port>1935</Port>
+				<WorkerCount>1</WorkerCount>
+			</RTMP>
+			<SRT>
+				<Port>9999</Port>
+				<WorkerCount>1</WorkerCount>
+				<!-- Eigener Thread je Verbindung. Bei den wenigen Eingängen hier
+				     unkritisch und ab Phase 3 nötig, damit ein wartender Webhook
+				     nicht die anderen Eingänge blockiert. -->
+				<ThreadPerSocket>true</ThreadPerSocket>
+			</SRT>
+		</Providers>
+
+		<Publishers>
+			<!-- Nur HTTP: Das Zertifikat macht Caddy, der davor sitzt. -->
+			<HLS>
+				<Port>13333</Port>
+				<WorkerCount>1</WorkerCount>
+			</HLS>
+		</Publishers>
+	</Bind>
+
+	<Managers>
+		<Host>
+			<Names>
+				<Name>*</Name>
+			</Names>
+		</Host>
+		<API>
+			<AccessToken>${ome_access_token}</AccessToken>
+		</API>
+	</Managers>
+
+	<VirtualHosts>
+		<VirtualHost>
+			<Name>default</Name>
+			<Host>
+				<Names>
+					<Name>*</Name>
+				</Names>
+			</Host>
+
+			<Applications>
+%{ for ch in channels ~}
+				<Application>
+					<Name>${ch.app}</Name>
+					<Type>live</Type>
+
+					<Providers>
+						<SRT />
+						<RTMP />
+					</Providers>
+
+					<OutputProfiles>
+						<OutputProfile>
+							<Name>abr</Name>
+							<!-- Fester Ausgabename statt $${OriginStreamName}: Der geheime
+							     Stream-Key steht damit nur in der Ingest-Adresse und nie
+							     im öffentlichen Wiedergabepfad. -->
+							<OutputStreamName>${ch.stream}</OutputStreamName>
+
+							<Playlist>
+								<Name>ABR</Name>
+								<!-- Ergibt /${ch.app}/${ch.stream}/ts:master.m3u8.
+								     "playlist" und "chunklist" wären reservierte Namen. -->
+								<FileName>master</FileName>
+								<Options>
+									<!-- Ohne das liefert der HLS-Publisher nichts aus:
+									     TS kann Bild und Ton nur gemeinsam transportieren. -->
+									<EnableTsPackaging>true</EnableTsPackaging>
+								</Options>
+
+								<Rendition>
+									<Name>720p</Name>
+									<Video>video_bypass</Video>
+									<Audio>audio_aac_128</Audio>
+								</Rendition>
+%{ if quality_profile == "normal" ~}
+								<Rendition>
+									<Name>480p</Name>
+									<Video>video_480</Video>
+									<Audio>audio_aac_128</Audio>
+								</Rendition>
+%{ endif ~}
+								<Rendition>
+									<Name>360p</Name>
+									<Video>video_360</Video>
+									<Audio>audio_aac_128</Audio>
+								</Rendition>
+								<Rendition>
+									<Name>144p</Name>
+									<Video>video_144</Video>
+									<Audio>audio_aac_128</Audio>
+								</Rendition>
+							</Playlist>
+
+							<Encodes>
+								<!-- Ein Ton für alle Stufen. BypassIfMatch reicht ihn
+								     unverändert durch, solange OBS AAC mit 48 kHz und zwei
+								     Kanälen sendet — sonst wird umgerechnet. -->
+								<Audio>
+									<Name>audio_aac_128</Name>
+									<Codec>aac</Codec>
+									<Bitrate>128000</Bitrate>
+									<Samplerate>48000</Samplerate>
+									<Channel>2</Channel>
+									<BypassIfMatch>
+										<Codec>eq</Codec>
+										<Samplerate>eq</Samplerate>
+										<Channel>eq</Channel>
+									</BypassIfMatch>
+								</Audio>
+
+								<!-- 720p bleibt unangetastet. Das spart den größten Teil
+								     der Rechenleistung. -->
+								<Video>
+									<Name>video_bypass</Name>
+									<Bypass>true</Bypass>
+								</Video>
+%{ if quality_profile == "normal" ~}
+								<Video>
+									<Name>video_480</Name>
+									<Codec>h264</Codec>
+									<Modules>x264</Modules>
+									<Bitrate>1200000</Bitrate>
+									<Width>854</Width>
+									<Height>480</Height>
+									<Framerate>30.0</Framerate>
+									<KeyFrameInterval>60</KeyFrameInterval>
+									<BFrames>0</BFrames>
+									<Profile>main</Profile>
+									<Preset>faster</Preset>
+									<ThreadCount>2</ThreadCount>
+								</Video>
+%{ endif ~}
+								<Video>
+									<Name>video_360</Name>
+									<Codec>h264</Codec>
+									<Modules>x264</Modules>
+									<Bitrate>600000</Bitrate>
+									<Width>640</Width>
+									<Height>360</Height>
+									<Framerate>30.0</Framerate>
+									<!-- Schlüsselbild alle 2 s bei 30 fps. Die Segmente von
+									     ${hls_segment_duration} s schneiden damit sauber. -->
+									<KeyFrameInterval>60</KeyFrameInterval>
+									<BFrames>0</BFrames>
+									<Profile>main</Profile>
+									<Preset>faster</Preset>
+									<ThreadCount>2</ThreadCount>
+								</Video>
+								<Video>
+									<Name>video_144</Name>
+									<Codec>h264</Codec>
+									<Modules>x264</Modules>
+									<Bitrate>100000</Bitrate>
+									<Width>256</Width>
+									<Height>144</Height>
+									<Framerate>30.0</Framerate>
+									<KeyFrameInterval>60</KeyFrameInterval>
+									<BFrames>0</BFrames>
+									<Profile>baseline</Profile>
+									<Preset>faster</Preset>
+									<ThreadCount>1</ThreadCount>
+								</Video>
+							</Encodes>
+						</OutputProfile>
+					</OutputProfiles>
+
+					<Publishers>
+						<HLS>
+							<SegmentCount>${hls_segment_count}</SegmentCount>
+							<SegmentDuration>${hls_segment_duration}</SegmentDuration>
+							<DVR>
+								<Enable>true</Enable>
+								<!-- true schreibt "#EXT-X-PLAYLIST-TYPE: EVENT". Nur dann
+								     zeigt Safaris nativer Player eine Zeitleiste. -->
+								<EventPlaylistType>${hls_event_playlist}</EventPlaylistType>
+								<TempStoragePath>/dvr/${ch.app}</TempStoragePath>
+								<!-- In SEKUNDEN. Die Doku-Tabelle behauptet Millisekunden,
+								     der Quelltext rechnet GetMaxDuration() * 1000. -->
+								<MaxDuration>${hls_dvr_max_duration}</MaxDuration>
+							</DVR>
+							<!-- CrossDomains fehlt bewusst: Die CORS-Kopfzeile setzt Caddy
+							     mit der konkreten Herkunft, nicht mit "*". -->
+						</HLS>
+					</Publishers>
+				</Application>
+%{ endfor ~}
+			</Applications>
+		</VirtualHost>
+	</VirtualHosts>
+</Server>
